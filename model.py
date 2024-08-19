@@ -1,17 +1,24 @@
 from torch import nn
 
 
+class LengthEmbedding(nn.Module):
+    def __init__(self, vocab_size, embedding_size):
+        super(LengthEmbedding, self).__init__()
+        self.embedding = nn.Embedding(vocab_size, embedding_size)
+
+
 class MolPropPredictor(nn.Module):
     def __init__(self, mol_inp_size):
         super().__init__()
-        self.lstm = nn.LSTM(input_size=mol_inp_size, hidden_size=128, num_layers=2, bidirectional=True)
-        self.lstm2 = nn.LSTM(input_size=128, hidden_size=128, num_layers=2, bidirectional=True)
-        self.linear = nn.Linear(in_features=128, out_features=1)
+        self.linear1 = nn.Linear(mol_inp_size, 128)
+        self.linear2 = nn.Linear(128, 256)
+        self.linear3 = nn.Linear(in_features=256, out_features=1)
         self.sigmoid = nn.Sigmoid()
+        self.relu = nn.ReLU()
 
-    def forward(self, x):
-        x, _ = self.lstm(x)
-        x, _ = self.lstm2(x)
-        x = self.linear(x)
+    def forward(self, x, lengths):
+        x = self.relu(self.linear1(x))
+        x = self.relu(self.linear2(x))
+        x = self.linear3(x)
         x = self.sigmoid(x)
         return x

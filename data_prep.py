@@ -1,5 +1,4 @@
 import pickle
-
 import numpy as np
 from openchem.data.utils import read_smiles_property_file
 from openchem.data.utils import get_tokens
@@ -14,7 +13,12 @@ labels = np.array(data[1:])
 
 labels[np.where(labels=='')] = '9'
 labels = labels.astype(int)
-# labels = labels.reshape(labels.shape[0], 1)
+
+# Filter out datapoints where label[0] is 9
+valid_indices = labels[0] != 9
+smiles = np.array(smiles)[valid_indices]
+labels = labels[:, valid_indices]
+
 labels = labels.T
 
 tokens, _, _ = get_tokens(smiles)

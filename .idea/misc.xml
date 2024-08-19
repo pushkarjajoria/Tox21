@@ -3,5 +3,5 @@
   <component name="Black">
     <option name="sdkName" value="lsv" />
   </component>
-  <component name="ProjectRootManager" version="2" project-jdk-name="OpenChem" project-jdk-type="Python SDK" />
+  <component name="ProjectRootManager" version="2" project-jdk-name="lsv" project-jdk-type="Python SDK" />
 </project>
