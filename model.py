@@ -16,7 +16,7 @@ class MolPropPredictor(nn.Module):
         self.sigmoid = nn.Sigmoid()
         self.relu = nn.ReLU()
 
-    def forward(self, x, lengths):
+    def forward(self, x):
         x = self.relu(self.linear1(x))
         x = self.relu(self.linear2(x))
         x = self.linear3(x)
