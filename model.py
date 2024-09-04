@@ -73,14 +73,14 @@ class MolPropPredictorMolFormer(nn.Module):
 class MolPropPredictor(nn.Module):
     def __init__(self, mol_inp_size):
         super().__init__()
-        self.linear1 = nn.Linear(mol_inp_size, 128)
-        self.linear2 = nn.Linear(128, 256)
+        self.linear1 = nn.Linear(mol_inp_size, 256)
+        # self.linear2 = nn.Linear(128, 256)
         self.linear3 = nn.Linear(in_features=256, out_features=2)
         self.relu = nn.ReLU()
 
     def forward(self, x):
         x = self.relu(self.linear1(x))
-        x = self.relu(self.linear2(x))
+        # x = self.relu(self.linear2(x))
         x = self.linear3(x)
         return x
 

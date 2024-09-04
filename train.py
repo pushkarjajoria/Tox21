@@ -21,72 +21,72 @@ train_dataset = SmilesDataset('./benchmark_datasets/tox21/train.smi')
 test_dataset = SmilesDataset('./benchmark_datasets/tox21/test.smi')
 
 # Using the noised dataset for training
-NOISE_LEVEL = 0.3
-train_dataset = NoisedDataset(original_dataset=train_dataset, noise_level=NOISE_LEVEL)
+NOISE_LEVELS = [0.0, 0.1, 0.2, 0.3]
+for NOISE_LEVEL in NOISE_LEVELS:
+    train_dataset = NoisedDataset(original_dataset=train_dataset, noise_level=NOISE_LEVEL)
 
-train_data_loader = DataLoader(dataset=train_dataset, batch_size=32, shuffle=True)
-test_data_loader = DataLoader(dataset=test_dataset, batch_size=32, shuffle=False)  # No shuffle for evaluation
+    train_data_loader = DataLoader(dataset=train_dataset, batch_size=32, shuffle=True)
+    test_data_loader = DataLoader(dataset=test_dataset, batch_size=32, shuffle=False)  # No shuffle for evaluation
+    
+    train_positive_percentage = calculate_positive_percentage(train_dataset)
+    test_positive_percentage = calculate_positive_percentage(test_dataset)
+    print(f'Percentage of positive test results in training dataset: {train_positive_percentage:.2f}%')
+    print(f'Percentage of positive test results in testing dataset: {test_positive_percentage:.2f}%')
 
 
-train_positive_percentage = calculate_positive_percentage(train_dataset)
-test_positive_percentage = calculate_positive_percentage(test_dataset)
-print(f'Percentage of positive test results in training dataset: {train_positive_percentage:.2f}%')
-print(f'Percentage of positive test results in testing dataset: {test_positive_percentage:.2f}%')
+    # Model setup
+    # Calculate weights for both classes
+    positive_weight = (100 - train_positive_percentage) / 100.0
+    negative_weight = train_positive_percentage / 100.0
+    class_weights = torch.tensor([negative_weight, positive_weight], dtype=torch.float32).to(device)  # Weight for both classes
 
+    inp_size = len(train_dataset.x)
+    baseline_model = MolPropPredictorMolFormer().to(device)
+    optim = torch.optim.Adam(baseline_model.parameters(), lr=1e-3)
+    criterion = torch.nn.CrossEntropyLoss(weight=class_weights).to(device)  # Use CrossEntropyLoss
 
-# Model setup
-# Calculate weights for both classes
-positive_weight = (100 - train_positive_percentage) / 100.0
-negative_weight = train_positive_percentage / 100.0
-class_weights = torch.tensor([negative_weight, positive_weight], dtype=torch.float32).to(device)  # Weight for both classes
+    epochs = 50
 
-inp_size = len(train_dataset.x)
-baseline_model = MolPropPredictorMolFormer().to(device)
-optim = torch.optim.Adam(baseline_model.parameters(), lr=1e-3)
-criterion = torch.nn.CrossEntropyLoss(weight=class_weights).to(device)  # Use CrossEntropyLoss
+    # Training loop
+    for epoch in tqdm(range(epochs)):
+        baseline_model.train()
+        for batch in train_data_loader:
+            x = batch['x'].float().to(device)
+            labels = batch['label'].long().to(device)  # Labels should be of type long for CrossEntropyLoss
+            optim.zero_grad()
+            output = baseline_model(x)
+            loss = criterion(output, labels)
+            loss.backward()
+            optim.step()
+        if epoch % 10 == 0:
+            print(f'Epoch: {epoch}, Loss: {loss.item():.4f}')
 
-epochs = 50
+    print(f"Baseline {NOISE_LEVEL*100}% Noise")
+    test(test_data_loader, baseline_model)
 
-# Training loop
-for epoch in tqdm(range(epochs)):
-    baseline_model.train()
-    for batch in train_data_loader:
-        x = batch['x'].float().to(device)
-        labels = batch['label'].long().to(device)  # Labels should be of type long for CrossEntropyLoss
-        optim.zero_grad()
-        output = baseline_model(x)
-        loss = criterion(output, labels)
-        loss.backward()
-        optim.step()
-    if epoch % 10 == 0:
-        print(f'Epoch: {epoch}, Loss: {loss.item():.4f}')
+    baseline_output, y_train_noise = get_all_pred_and_labels(baseline_model, train_data_loader)
+    baseline_confusion = np.zeros((2, 2))
+    for n, p in zip(y_train_noise, baseline_output):
+        n = n.cpu().numpy()
+        p = p.cpu().numpy()
+        baseline_confusion[p, n] += 1.
 
-print(f"Baseline {NOISE_LEVEL*100}% Noise")
-test(test_data_loader, baseline_model)
+    channel_weights = baseline_confusion.copy()
+    channel_weights /= channel_weights.sum(axis=1, keepdims=True)
+    channel_weights = np.log(channel_weights + 1e-8)
+    channel_weights = torch.from_numpy(channel_weights)
+    channel_weights = channel_weights.float()
+    noisemodel = NoiseLayer(theta=channel_weights.to(device), k=2)
+    noise_optimizer = torch.optim.Adam(noisemodel.parameters(),
+                                 lr=1e-3)
 
-baseline_output, y_train_noise = get_all_pred_and_labels(baseline_model, train_data_loader)
-baseline_confusion = np.zeros((2, 2))
-for n, p in zip(y_train_noise, baseline_output):
-    n = n.cpu().numpy()
-    p = p.cpu().numpy()
-    baseline_confusion[p, n] += 1.
+    print("noisy channel finished.")
+    # noisy model train and test
+    for epoch in tqdm(range(epochs)):
+        hybrid_train(train_data_loader, baseline_model, noisemodel, optim, noise_optimizer, criterion)
 
-channel_weights = baseline_confusion.copy()
-channel_weights /= channel_weights.sum(axis=1, keepdims=True)
-channel_weights = np.log(channel_weights + 1e-8)
-channel_weights = torch.from_numpy(channel_weights)
-channel_weights = channel_weights.float()
-noisemodel = NoiseLayer(theta=channel_weights.to(device), k=2)
-noise_optimizer = torch.optim.Adam(noisemodel.parameters(),
-                             lr=1e-3)
+    print(f"After hybrid, test acc {NOISE_LEVEL*100}% Noise: ")
+    test(test_data_loader, baseline_model)
+    print("Finished hybrid training.")
 
-print("noisy channel finished.")
-# noisy model train and test
-for epoch in tqdm(range(epochs)):
-    hybrid_train(train_data_loader, baseline_model, noisemodel, optim, noise_optimizer, criterion)
-
-print(f"After hybrid, test acc {NOISE_LEVEL*100}% Noise: ")
-test(test_data_loader, baseline_model)
-print("Finished hybrid training.")
-
-# Evaluation after training
+    # Evaluation after training

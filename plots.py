@@ -3,17 +3,17 @@ import matplotlib.pyplot as plt
 # Data from the log
 noise_levels = [0, 10, 20, 30]
 
-baseline_accuracy = [0.9573, 0.9532, 0.9443, 0.9491]
-noise_layer_accuracy = [0.9573, 0.9587, 0.9511, 0.9353]
+baseline_accuracy = [0.9615, 0.9615, 0.9408, 0.9587]
+noise_layer_accuracy = [0.9532, 0.9573, 0.9594, 0.9560]
 
-baseline_precision = [0.5179, 0.4667, 0.3559, 0.4038]
-noise_layer_precision = [0.5200, 0.5370, 0.4255, 0.3125]
+baseline_precision = [0.5769, 0.5800, 0.3721, 0.5400]
+noise_layer_precision = [0.4706, 0.5179, 0.5490, 0.5000]
 
-baseline_recall = [0.4531, 0.4375, 0.3281, 0.3281]
-noise_layer_recall = [0.4062, 0.4531, 0.3125, 0.3906]
+baseline_recall = [0.4688, 0.4531, 0.5000, 0.4219]
+noise_layer_recall = [0.5000, 0.4531, 0.4375, 0.3125]
 
-baseline_f1 = [0.4833, 0.4516, 0.3415, 0.3621]
-noise_layer_f1 = [0.4561, 0.4915, 0.3604, 0.3472]
+baseline_f1 = [0.5172, 0.5088, 0.4267, 0.4737]
+noise_layer_f1 = [0.4848, 0.4833, 0.4870, 0.3846]
 
 # Plotting
 plt.figure(figsize=(12, 8))
