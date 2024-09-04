@@ -18,7 +18,7 @@ def get_all_pred_and_labels(model, train_data_loader):
     all_labels = []
     all_preds = []
     for batch in train_data_loader:
-        x = batch['fingerprint'].float().to(device)
+        x = batch['x']
         labels = batch['label'].long().to(device)  # Labels should be of type long for CrossEntropyLoss
         output = model(x)
         pred = torch.argmax(output, dim=1).cpu()  # Apply threshold for binary classification
