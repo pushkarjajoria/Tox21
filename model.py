@@ -32,14 +32,18 @@ class MolPropPredictorMolFormer(nn.Module):
             param.requires_grad = False
 
         # Define the final linear layer
-        self.classifier = nn.Linear(self.transformer.config.hidden_size, 2)
+        self.linear1 = nn.Linear(self.transformer.config.hidden_size, 2)
+        self.linear2 = nn.Linear(128, 256)
+        self.classifier = nn.Linear(in_features=256, out_features=2)
         self.relu = nn.ReLU()
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
     def forward(self, smiles):
         x = self.tokenizer(smiles, padding=True, return_tensors="pt").to(self.device)
         outputs = self.transformer(**x)
-        x = self.classifier(self.relu(outputs.pooler_output))
+        x = self.relu(self.linear1(self.relu(outputs.pooler_output)))
+        x = self.relu(self.linear2(x))
+        x = self.classifer(x)
         return x
 
 

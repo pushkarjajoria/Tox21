@@ -45,7 +45,7 @@ baseline_model = MolPropPredictorMolFormer().to(device)
 optim = torch.optim.Adam(baseline_model.parameters(), lr=1e-3)
 criterion = torch.nn.CrossEntropyLoss(weight=class_weights).to(device)  # Use CrossEntropyLoss
 
-epochs = 2
+epochs = 50
 
 # Training loop
 for epoch in tqdm(range(epochs)):
