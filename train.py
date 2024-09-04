@@ -23,11 +23,12 @@ test_dataset = SmilesDataset('./benchmark_datasets/tox21/test.smi')
 # Using the noised dataset for training
 NOISE_LEVELS = [0.0, 0.1, 0.2, 0.3]
 for NOISE_LEVEL in NOISE_LEVELS:
+    print(f"Training for Noise level {NOISE_LEVEL*100}%")
     train_dataset = NoisedDataset(original_dataset=train_dataset, noise_level=NOISE_LEVEL)
 
     train_data_loader = DataLoader(dataset=train_dataset, batch_size=32, shuffle=True)
     test_data_loader = DataLoader(dataset=test_dataset, batch_size=32, shuffle=False)  # No shuffle for evaluation
-    
+
     train_positive_percentage = calculate_positive_percentage(train_dataset)
     test_positive_percentage = calculate_positive_percentage(test_dataset)
     print(f'Percentage of positive test results in training dataset: {train_positive_percentage:.2f}%')
