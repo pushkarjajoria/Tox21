@@ -8,31 +8,41 @@ from model import Molformer
 
 
 class SmilesDataset(Dataset):
-    def __init__(self, file_path):
-        self.embeddings = []
+    def __init__(self, file_path, batch_size=32):
+        self.batch_size = batch_size
+        self.smiles = []
         self.labels = []
+        self.x = []  # Reverting the name from "embeddings" to "x"
+
         molformer = Molformer()
+
+        # Load SMILES and labels
         with open(file_path, 'r') as f:
             for line in f:
                 parts = line.strip().split(',')
                 if len(parts) > 1:
                     smile = parts[0]
                     label = int(parts[1])
-
-                    # Get embedding for the SMILES string
-                    with torch.no_grad():
-                        embedding = molformer([smile]).cpu().numpy()
-
-                    self.embeddings.append(embedding)
+                    self.smiles.append(smile)
                     self.labels.append(label)
 
+        # Process SMILES in batches
+        for i in range(0, len(self.smiles), self.batch_size):
+            batch_smiles = self.smiles[i:i + self.batch_size]
+            with torch.no_grad():
+                batch_x = molformer(batch_smiles)  # Use "batch_x" instead of "batch_embeddings"
+            self.x.append(batch_x.cpu())
+
+        # Flatten the list of tensors into a single tensor
+        self.x = torch.cat(self.x, dim=0)
+        self.labels = torch.tensor(self.labels, dtype=torch.float32)
+
     def __len__(self):
-        return len(self.embeddings)
+        return len(self.smiles)
 
     def __getitem__(self, idx):
-        return {'embedding': torch.tensor(self.embeddings[idx], dtype=torch.float32),
-                'label': torch.tensor(self.labels[idx], dtype=torch.float32)}
-
+        return {'x': self.x[idx],  # Return "x" instead of "embedding"
+                'label': self.labels[idx]}
 def read_csv_property_file(filepath, cols_to_read):
     # Read the CSV file into a DataFrame
     df = pd.read_csv(filepath)
