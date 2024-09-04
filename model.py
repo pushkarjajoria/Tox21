@@ -32,7 +32,7 @@ class MolPropPredictorMolFormer(nn.Module):
             param.requires_grad = False
 
         # Define the final linear layer
-        self.linear1 = nn.Linear(self.transformer.config.hidden_size, 2)
+        self.linear1 = nn.Linear(self.transformer.config.hidden_size, 128)
         self.linear2 = nn.Linear(128, 256)
         self.classifier = nn.Linear(in_features=256, out_features=2)
         self.relu = nn.ReLU()
