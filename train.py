@@ -21,7 +21,7 @@ train_dataset = SmilesDataset('./benchmark_datasets/tox21/train.smi')
 test_dataset = SmilesDataset('./benchmark_datasets/tox21/test.smi')
 
 # Using the noised dataset for training
-NOISE_LEVEL = 20.0
+NOISE_LEVEL = 0.1
 train_dataset = NoisedDataset(original_dataset=train_dataset, noise_level=NOISE_LEVEL)
 
 train_data_loader = DataLoader(dataset=train_dataset, batch_size=32, shuffle=True)
@@ -61,7 +61,7 @@ for epoch in tqdm(range(epochs)):
     if epoch % 10 == 0:
         print(f'Epoch: {epoch}, Loss: {loss.item():.4f}')
 
-print(f"Baseline {NOISE_LEVEL}% Noise")
+print(f"Baseline {NOISE_LEVEL*100}% Noise")
 test(test_data_loader, baseline_model)
 
 baseline_output, y_train_noise = get_all_pred_and_labels(baseline_model, train_data_loader)
@@ -85,7 +85,7 @@ print("noisy channel finished.")
 for epoch in tqdm(range(epochs)):
     hybrid_train(train_data_loader, baseline_model, noisemodel, optim, noise_optimizer, criterion)
 
-print(f"After hybrid, test acc {NOISE_LEVEL}% Noise: ")
+print(f"After hybrid, test acc {NOISE_LEVEL*100}% Noise: ")
 test(test_data_loader, baseline_model)
 print("Finished hybrid training.")
 
