@@ -1,3 +1,5 @@
+from functools import cache
+
 import torch
 import torch.nn as nn
 import numpy as np
@@ -9,6 +11,33 @@ class LengthEmbedding(nn.Module):
     def __init__(self, vocab_size, embedding_size):
         super(LengthEmbedding, self).__init__()
         self.embedding = nn.Embedding(vocab_size, embedding_size)
+
+def singleton(class_):
+    instances = {}
+    def getinstance(*args, **kwargs):
+        if class_ not in instances:
+            instances[class_] = class_(*args, **kwargs)
+        return instances[class_]
+    return getinstance
+
+
+@singleton
+class Molformer(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.transformer = AutoModel.from_pretrained("ibm/MoLFormer-XL-both-10pct", deterministic_eval=True, trust_remote_code=True)
+        self.tokenizer = AutoTokenizer.from_pretrained("ibm/MoLFormer-XL-both-10pct", trust_remote_code=True)
+
+    def forward(self, x):
+        x = self.tokenizer(smiles, padding=True, return_tensors="pt").to(self.device)
+        outputs = self.transformer(**x)
+        return outputs
+
+
+@cache
+def get_embeddings(x):
+    molformer = Molformer()
+    return molformer(x)
 
 
 class MolPropPredictorMolFormer(nn.Module):
@@ -39,8 +68,9 @@ class MolPropPredictorMolFormer(nn.Module):
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
     def forward(self, smiles):
-        x = self.tokenizer(smiles, padding=True, return_tensors="pt").to(self.device)
-        outputs = self.transformer(**x)
+        # x = self.tokenizer(smiles, padding=True, return_tensors="pt").to(self.device)
+        # outputs = self.transformer(**x)
+        outputs = get_embeddings(smiles)
         x = self.relu(self.linear1(self.relu(outputs.pooler_output)))
         x = self.relu(self.linear2(x))
         x = self.classifier(x)
