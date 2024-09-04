@@ -19,13 +19,17 @@ class MolPropPredictorMolFormer(nn.Module):
 
         # Freeze the transformer layers to only fine-tune the last layer
         # Freeze all transformer layers except the last one
-        for name, param in self.transformer.named_parameters():
-            if "encoder.layer" in name:
-                layer_num = int(name.split(".")[2])
-                if layer_num < self.transformer.config.num_hidden_layers - 1:
-                    param.requires_grad = False
-                else:
-                    param.requires_grad = True
+        # for name, param in self.transformer.named_parameters():
+        #     if "encoder.layer" in name:
+        #         layer_num = int(name.split(".")[2])
+        #         if layer_num < self.transformer.config.num_hidden_layers - 1:
+        #             param.requires_grad = False
+        #         else:
+        #             param.requires_grad = True
+
+        # Freeze the transformer layers to only fine-tune the last layer
+        for param in self.transformer.parameters():
+            param.requires_grad = False
 
         # Define the final linear layer
         self.classifier = nn.Linear(self.transformer.config.hidden_size, 2)
