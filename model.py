@@ -43,7 +43,7 @@ class MolPropPredictorMolFormer(nn.Module):
         outputs = self.transformer(**x)
         x = self.relu(self.linear1(self.relu(outputs.pooler_output)))
         x = self.relu(self.linear2(x))
-        x = self.classifer(x)
+        x = self.classifier(x)
         return x
 
 
