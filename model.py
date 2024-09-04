@@ -38,7 +38,7 @@ class Molformer(nn.Module):
 class MolPropPredictorMolFormer(nn.Module):
     def __init__(self):
         super().__init__()
-        self.hidden_size = Molformer().transformer.hidden_size
+        self.hidden_size = Molformer().transformer.config.hidden_size
         # self.transformer = AutoModel.from_pretrained("ibm/MoLFormer-XL-both-10pct", deterministic_eval=True, trust_remote_code=True)
         # self.tokenizer = AutoTokenizer.from_pretrained("ibm/MoLFormer-XL-both-10pct", trust_remote_code=True)
 
