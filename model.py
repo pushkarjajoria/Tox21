@@ -10,6 +10,30 @@ class LengthEmbedding(nn.Module):
         super(LengthEmbedding, self).__init__()
         self.embedding = nn.Embedding(vocab_size, embedding_size)
 
+def singleton(class_):
+    instances = {}
+    def getinstance(*args, **kwargs):
+        if class_ not in instances:
+            instances[class_] = class_(*args, **kwargs)
+        return instances[class_]
+    return getinstance
+
+@singleton
+class Molformer(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.transformer = AutoModel.from_pretrained("ibm/MoLFormer-XL-both-10pct", deterministic_eval=True, trust_remote_code=True)
+        self.tokenizer = AutoTokenizer.from_pretrained("ibm/MoLFormer-XL-both-10pct", trust_remote_code=True)
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.transformer.to(self.device)
+
+    def forward(self, smiles):
+        self.eval()
+        with torch.no_grad():
+            x = self.tokenizer(smiles, padding=True, return_tensors="pt").to(self.device)
+            outputs = self.transformer(**x)
+        return outputs.last_hidden_state.mean(dim=1)  # Example: Mean pooling of the output embeddings
+
 
 class MolPropPredictorMolFormer(nn.Module):
     def __init__(self):

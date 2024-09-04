@@ -4,27 +4,34 @@ from sklearn.model_selection import train_test_split
 import torch
 from torch.utils.data import Dataset
 
+from model import Molformer
+
 
 class SmilesDataset(Dataset):
     def __init__(self, file_path):
-        self.x = []
+        self.embeddings = []
         self.labels = []
+        molformer = Molformer()
         with open(file_path, 'r') as f:
             for line in f:
                 parts = line.strip().split(',')
                 if len(parts) > 1:
                     smile = parts[0]
                     label = int(parts[1])
-                    self.x.append(smile)
+
+                    # Get embedding for the SMILES string
+                    with torch.no_grad():
+                        embedding = molformer([smile]).cpu().numpy()
+
+                    self.embeddings.append(embedding)
                     self.labels.append(label)
 
     def __len__(self):
-        return len(self.x)
+        return len(self.embeddings)
 
     def __getitem__(self, idx):
-        return {'x': self.x[idx],
-                'label': torch.tensor(self.labels[idx], dtype=torch.float)}
-
+        return {'embedding': torch.tensor(self.embeddings[idx], dtype=torch.float32),
+                'label': torch.tensor(self.labels[idx], dtype=torch.float32)}
 
 def read_csv_property_file(filepath, cols_to_read):
     # Read the CSV file into a DataFrame
