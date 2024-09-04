@@ -1,12 +1,12 @@
 from torch.utils.data import DataLoader
-from data_prep import FingerprintDataset, calculate_positive_percentage, NoisedDataset
+# from data_prep import FingerprintDataset
+from data_prep_transformer import SmilesDataset
 from eval import get_all_pred_and_labels
 from tqdm import tqdm
 import torch
 import numpy as np
-
-from model import MolPropPredictor, NoiseLayer
-from utils import hybrid_train, test
+from model import MolPropPredictor, NoiseLayer, MolPropPredictorMolFormer
+from utils import hybrid_train, test, NoisedDataset, calculate_positive_percentage
 
 # Device setup
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -14,11 +14,14 @@ print(f"Running the model on {device}")
 print(torch.version.cuda)
 
 # Dataset preparation
-train_dataset = FingerprintDataset('./benchmark_datasets/tox21/train.smi')
-test_dataset = FingerprintDataset('./benchmark_datasets/tox21/test.smi')
+# train_dataset = FingerprintDataset('./benchmark_datasets/tox21/train.smi')
+# test_dataset = FingerprintDataset('./benchmark_datasets/tox21/test.smi')
+
+train_dataset = SmilesDataset('./benchmark_datasets/tox21/train.smi')
+test_dataset = SmilesDataset('./benchmark_datasets/tox21/test.smi')
 
 # Using the noised dataset for training
-NOISE_LEVEL = 0.3
+NOISE_LEVEL = 0.0
 train_dataset = NoisedDataset(original_dataset=train_dataset, noise_level=NOISE_LEVEL)
 
 train_data_loader = DataLoader(dataset=train_dataset, batch_size=64, shuffle=True)
@@ -37,9 +40,8 @@ positive_weight = (100 - train_positive_percentage) / 100.0
 negative_weight = train_positive_percentage / 100.0
 class_weights = torch.tensor([negative_weight, positive_weight], dtype=torch.float32).to(device)  # Weight for both classes
 
-inp_size = train_dataset.fingerprints.shape[1]
-assert train_dataset.fingerprints.shape[1] == test_dataset.fingerprints.shape[1] # OpenChem Bug
-baseline_model = MolPropPredictor(inp_size).to(device)
+inp_size = len(train_dataset.x)
+baseline_model = MolPropPredictorMolFormer().to(device)
 optim = torch.optim.Adam(baseline_model.parameters(), lr=1e-3)
 criterion = torch.nn.CrossEntropyLoss(weight=class_weights).to(device)  # Use CrossEntropyLoss
 
@@ -49,7 +51,7 @@ epochs = 50
 for epoch in tqdm(range(epochs)):
     baseline_model.train()
     for batch in train_data_loader:
-        x = batch['fingerprint'].float().to(device)
+        x = batch['x']
         labels = batch['label'].long().to(device)  # Labels should be of type long for CrossEntropyLoss
         optim.zero_grad()
         output = baseline_model(x)
@@ -76,6 +78,7 @@ channel_weights = channel_weights.float()
 noisemodel = NoiseLayer(theta=channel_weights.to(device), k=2)
 noise_optimizer = torch.optim.Adam(noisemodel.parameters(),
                              lr=1e-3)
+
 print("noisy channel finished.")
 # noisy model train and test
 for epoch in tqdm(range(epochs)):

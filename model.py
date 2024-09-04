@@ -2,11 +2,40 @@ import torch
 import torch.nn as nn
 import numpy as np
 import torch.nn.functional as F
+from transformers import AutoModel, AutoTokenizer
+
 
 class LengthEmbedding(nn.Module):
     def __init__(self, vocab_size, embedding_size):
         super(LengthEmbedding, self).__init__()
         self.embedding = nn.Embedding(vocab_size, embedding_size)
+
+
+class MolPropPredictorMolFormer(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.transformer = AutoModel.from_pretrained("ibm/MoLFormer-XL-both-10pct", deterministic_eval=True, trust_remote_code=True)
+        self.tokenizer = AutoTokenizer.from_pretrained("ibm/MoLFormer-XL-both-10pct", trust_remote_code=True)
+
+        # Freeze the transformer layers to only fine-tune the last layer
+        # Freeze all transformer layers except the last one
+        for name, param in self.transformer.named_parameters():
+            if "encoder.layer" in name:
+                layer_num = int(name.split(".")[2])
+                if layer_num < self.transformer.config.num_hidden_layers - 1:
+                    param.requires_grad = False
+                else:
+                    param.requires_grad = True
+
+        # Define the final linear layer
+        self.classifier = nn.Linear(self.transformer.config.hidden_size, 2)
+        self.relu = nn.ReLU()
+
+    def forward(self, smiles):
+        x = self.tokenizer(smiles, padding=True, return_tensors="pt")
+        outputs = self.transformer(**x)
+        x = self.classifier(self.relu(outputs.pooler_output))
+        return x
 
 
 class MolPropPredictor(nn.Module):
@@ -38,3 +67,13 @@ class NoiseLayer(nn.Module):
         theta = self.softmax(theta)
         out = torch.matmul(x, theta)
         return out
+
+
+if __name__ == "__main__":
+    import torch
+
+    model = MolPropPredictorMolFormer()
+    smiles = ["Cn1c(=O)c2c(ncn2C)n(C)c1=O", "CC(=O)Oc1ccccc1C(=O)O"]
+    with torch.no_grad():
+        outputs = model(smiles)
+    print(outputs)
