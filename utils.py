@@ -58,7 +58,7 @@ def test(test_loader, model):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     with torch.no_grad():
         for batch in test_loader:
-            x = batch['x']
+            x = batch['x'].float().to(device)
             labels = batch['label'].long().to(device)
             output = model(x)
             preds = torch.argmax(output, dim=1).cpu().numpy()  # Apply threshold for binary classification
@@ -93,7 +93,7 @@ def hybrid_train(train_loader, model, noisemodel, optimizer, noise_optimizer, cr
     model.train()
     noisemodel.train()
     for batch in train_loader:
-        x = batch['x']
+        x = batch['x'].float().to(device)
         labels = batch['label'].long().to(device)
         # set all gradient to zero
         optimizer.zero_grad()

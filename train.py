@@ -51,7 +51,7 @@ epochs = 50
 for epoch in tqdm(range(epochs)):
     baseline_model.train()
     for batch in train_data_loader:
-        x = batch['x']
+        x = batch['x'].float().to(device)
         labels = batch['label'].long().to(device)  # Labels should be of type long for CrossEntropyLoss
         optim.zero_grad()
         output = baseline_model(x)
