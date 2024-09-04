@@ -32,14 +32,15 @@ class Molformer(nn.Module):
         with torch.no_grad():
             x = self.tokenizer(smiles, padding=True, return_tensors="pt").to(self.device)
             outputs = self.transformer(**x)
-        return outputs.last_hidden_state.mean(dim=1)  # Example: Mean pooling of the output embeddings
+        return outputs.pooler_output
 
 
 class MolPropPredictorMolFormer(nn.Module):
     def __init__(self):
         super().__init__()
-        self.transformer = AutoModel.from_pretrained("ibm/MoLFormer-XL-both-10pct", deterministic_eval=True, trust_remote_code=True)
-        self.tokenizer = AutoTokenizer.from_pretrained("ibm/MoLFormer-XL-both-10pct", trust_remote_code=True)
+        self.hidden_size = Molformer().transformer.hidden_size
+        # self.transformer = AutoModel.from_pretrained("ibm/MoLFormer-XL-both-10pct", deterministic_eval=True, trust_remote_code=True)
+        # self.tokenizer = AutoTokenizer.from_pretrained("ibm/MoLFormer-XL-both-10pct", trust_remote_code=True)
 
         # Freeze the transformer layers to only fine-tune the last layer
         # Freeze all transformer layers except the last one
@@ -52,20 +53,18 @@ class MolPropPredictorMolFormer(nn.Module):
         #             param.requires_grad = True
 
         # Freeze the transformer layers to only fine-tune the last layer
-        for param in self.transformer.parameters():
-            param.requires_grad = False
+        # for param in self.transformer.parameters():
+        #     param.requires_grad = False
 
         # Define the final linear layer
-        self.linear1 = nn.Linear(self.transformer.config.hidden_size, 128)
+        self.linear1 = nn.Linear(self.hidden_size, 128)
         self.linear2 = nn.Linear(128, 256)
         self.classifier = nn.Linear(in_features=256, out_features=2)
         self.relu = nn.ReLU()
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    def forward(self, smiles):
-        x = self.tokenizer(smiles, padding=True, return_tensors="pt").to(self.device)
-        outputs = self.transformer(**x)
-        x = self.relu(self.linear1(self.relu(outputs.pooler_output)))
+    def forward(self, molbert_embeddings):
+        x = self.relu(self.linear1(self.relu(molbert_embeddings)))
         x = self.relu(self.linear2(x))
         x = self.classifier(x)
         return x
