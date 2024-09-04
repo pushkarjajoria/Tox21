@@ -24,8 +24,8 @@ test_dataset = SmilesDataset('./benchmark_datasets/tox21/test.smi')
 NOISE_LEVEL = 0.0
 train_dataset = NoisedDataset(original_dataset=train_dataset, noise_level=NOISE_LEVEL)
 
-train_data_loader = DataLoader(dataset=train_dataset, batch_size=64, shuffle=True)
-test_data_loader = DataLoader(dataset=test_dataset, batch_size=64, shuffle=False)  # No shuffle for evaluation
+train_data_loader = DataLoader(dataset=train_dataset, batch_size=32, shuffle=True)
+test_data_loader = DataLoader(dataset=test_dataset, batch_size=32, shuffle=False)  # No shuffle for evaluation
 
 
 train_positive_percentage = calculate_positive_percentage(train_dataset)
