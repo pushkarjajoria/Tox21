@@ -21,7 +21,7 @@ train_dataset = SmilesDataset('./benchmark_datasets/tox21/train.smi')
 test_dataset = SmilesDataset('./benchmark_datasets/tox21/test.smi')
 
 # Using the noised dataset for training
-NOISE_LEVEL = 10.0
+NOISE_LEVEL = 20.0
 train_dataset = NoisedDataset(original_dataset=train_dataset, noise_level=NOISE_LEVEL)
 
 train_data_loader = DataLoader(dataset=train_dataset, batch_size=32, shuffle=True)
