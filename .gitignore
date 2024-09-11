@@ -187,6 +187,11 @@ var/
 wheels/
 share/python-wheels/
 *.egg-info/
+logfiles/
+logs/
+.idea/
+__pycache__/
+benchmark_datasets/
 .installed.cfg
 *.egg
 MANIFEST

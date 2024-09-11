@@ -45,7 +45,6 @@ class FingerprintDataset(Dataset):
                 'label': torch.tensor(self.labels[idx], dtype=torch.float)}
 
 
-
 if __name__ == "__main__":
 
     data = read_smiles_property_file('../OpenChem/benchmark_datasets/tox21/tox21.csv',

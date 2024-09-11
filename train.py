@@ -21,7 +21,7 @@ train_dataset = SmilesDataset('./benchmark_datasets/tox21/train.smi')
 test_dataset = SmilesDataset('./benchmark_datasets/tox21/test.smi')
 
 # Using the noised dataset for training
-NOISE_LEVELS = [0.0, 0.1, 0.2, 0.3]
+NOISE_LEVELS = [0.0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3]
 for NOISE_LEVEL in NOISE_LEVELS:
     print(f"Training for Noise level {NOISE_LEVEL*100}%")
     train_dataset = NoisedDataset(original_dataset=train_dataset, noise_level=NOISE_LEVEL)
@@ -33,7 +33,6 @@ for NOISE_LEVEL in NOISE_LEVELS:
     test_positive_percentage = calculate_positive_percentage(test_dataset)
     print(f'Percentage of positive test results in training dataset: {train_positive_percentage:.2f}%')
     print(f'Percentage of positive test results in testing dataset: {test_positive_percentage:.2f}%')
-
 
     # Model setup
     # Calculate weights for both classes

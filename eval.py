@@ -26,3 +26,21 @@ def get_all_pred_and_labels(model, train_data_loader):
         all_preds += pred
     return all_preds, all_labels
 
+
+def get_all_pred_and_labels_mnist(model, train_data_loader):
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    all_labels = []
+    all_preds = []
+
+    model.eval()  # Set model to evaluation mode (disable dropout, batch norm, etc.)
+
+    with torch.no_grad():  # Disable gradient computation
+        for batch in train_data_loader:
+            x = batch[0].float().to(device)  # Use batch[0] for input images (MNIST)
+            labels = batch[1].long().to(device)  # Use batch[1] for labels (MNIST)
+            output = model(x)
+            preds = torch.argmax(output, dim=1).cpu()  # Get predicted class index
+            all_labels.extend(labels.cpu().numpy())  # Store true labels
+            all_preds.extend(preds.numpy())  # Store predicted labels
+
+    return all_preds, all_labels
