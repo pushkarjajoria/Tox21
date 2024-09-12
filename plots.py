@@ -1,5 +1,5 @@
 import matplotlib.pyplot as plt
-
+from datetime import datetime
 
 def plot_comparison_figure(noise_levels, **kwargs):
     # Data from the log
@@ -57,4 +57,9 @@ def plot_comparison_figure(noise_levels, **kwargs):
     plt.legend()
 
     plt.tight_layout()
+    current_time = datetime.now().strftime("%Y-%m-%d_%H-%M")
+    plot_name = f"plots/baseline_vs_noise_adaptation_{current_time}.png"
+
+    # Save the plot with the new name
+    plt.savefig(plot_name)
     plt.show()

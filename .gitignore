@@ -192,6 +192,7 @@ logs/
 .idea/
 __pycache__/
 benchmark_datasets/
+plots/
 .installed.cfg
 *.egg
 MANIFEST

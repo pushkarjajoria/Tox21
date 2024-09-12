@@ -265,7 +265,7 @@ def get_class_distribution_and_weights(dataset, device):
 
 def hybrid_train_mnist(train_loader, model, noisemodel, optimizer, noise_optimizer, criterion):
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    BETA = 0.95  # Ignore baseline loss
+    BETA = 1  # Ignore baseline loss
     model.train()
     noisemodel.train()
 
@@ -429,18 +429,18 @@ def train_model_with_early_stopping(
             running_loss += loss.item()
 
         # Validation Step
-        val_accuracy, val_precision, val_recall, val_f1, val_loss = validate_model(model, valid_data_loader,
+        val_accuracy, val_precision, val_recall, val_f1, av_val_loss = validate_model(model, valid_data_loader,
                                                                                    criterion, device)
         print(f'Epoch: {epoch + 1}/{epochs}, '
-              f'Training Loss: {running_loss:.4f}, '
-              f'Validation Loss: {val_loss:.4f}, '
+              f'Training Loss: {running_loss/len(train_data_loader):.4f}, '
+              f'Validation Loss: {av_val_loss:.4f}, '
               f'Accuracy: {val_accuracy:.4f}, '
               f'Precision: {val_precision:.4f}, '
               f'Recall: {val_recall:.4f}, '
               f'F1 Score: {val_f1:.4f}')
 
         # Check early stopping
-        early_stopping(val_loss, model)
+        early_stopping(av_val_loss, model)
 
         if early_stopping.early_stop:
             print("Early stopping triggered. Stopping training.")

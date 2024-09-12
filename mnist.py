@@ -10,7 +10,7 @@ from logger import custom_print
 from model import NoiseLayer, MNISTClassifier
 from plots import plot_comparison_figure
 from utils import test, get_class_distribution_and_weights, test_mnist, hybrid_train_mnist, \
-    NoisedMNISTDataset, EarlyStopping, train_model_with_early_stopping
+    NoisedMNISTDataset, EarlyStopping, train_model_with_early_stopping, validate_model
 
 # Backup the original print function to use later
 built_in_print = print
@@ -110,6 +110,7 @@ for NOISE_LEVEL in NOISE_LEVELS:
 
     print("noisy channel finished.")
     # noisy model train and test
+
     for epoch in tqdm(range(epochs)):
         hybrid_train_mnist(train_data_loader, baseline_model, noisemodel, optim, noise_optimizer, criterion)
 
