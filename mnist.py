@@ -125,7 +125,7 @@ for NOISE_LEVEL in NOISE_LEVELS:
     for n, p in zip(y_train_noise, baseline_output):
         baseline_confusion[p, n] += 1.
 
-    # Compute channel weights
+    # Compute channel weights TODO: Check this part of the code!
     channel_weights = baseline_confusion.copy()
     channel_weights /= channel_weights.sum(axis=1, keepdims=True)
     channel_weights = np.log(channel_weights + 1e-8)

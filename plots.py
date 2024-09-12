@@ -1,6 +1,7 @@
 import matplotlib.pyplot as plt
 from datetime import datetime
 
+
 def plot_comparison_figure(noise_levels, **kwargs):
     # Data from the log
     noise_levels = noise_levels
