@@ -191,6 +191,7 @@ logfiles/
 logs/
 .idea/
 __pycache__/
+__pycache__/*
 benchmark_datasets/
 plots/
 .installed.cfg

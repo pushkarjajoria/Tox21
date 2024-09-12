@@ -102,31 +102,21 @@ class NoiseLayer(nn.Module):
 
 
 class MNISTClassifier(nn.Module):
-    def __init__(self):
+    def __init__(self, img_size=28*28, nhiddens1=500, nhiddens2=300, nb_classes=10, DROPOUT=0.5):
         super(MNISTClassifier, self).__init__()
-        # First convolutional layer: input channels=1 (grayscale image), output channels=32, kernel size=3
-        self.conv1 = nn.Conv2d(1, 32, kernel_size=3, padding=1)
-        # Second convolutional layer: input channels=32, output channels=64, kernel size=3
-        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, padding=1)
-        # Max pooling layer: kernel size=2, stride=2
-        self.pool = nn.MaxPool2d(kernel_size=2, stride=2)
-        # Fully connected layer 1: input features=7*7*64, output features=128
-        self.fc1 = nn.Linear(64 * 7 * 7, 128)
-        # Fully connected layer 2: input features=128, output features=10 (for 10 MNIST classes)
-        self.fc2 = nn.Linear(128, 10)
+        self.fc1 = nn.Linear(img_size, nhiddens1)
+        self.dropout1 = nn.Dropout(DROPOUT)
+        self.fc2 = nn.Linear(nhiddens1, nhiddens2)
+        self.dropout2 = nn.Dropout(DROPOUT)
+        self.output = nn.Linear(nhiddens2, nb_classes)
 
     def forward(self, x):
-        # Apply first convolutional layer, then ReLU activation, and then max pooling
-        x = self.pool(F.relu(self.conv1(x)))
-        # Apply second convolutional layer, then ReLU activation, and then max pooling
-        x = self.pool(F.relu(self.conv2(x)))
-        # Flatten the tensor into a vector
-        x = x.view(-1, 64 * 7 * 7)
-        # Apply first fully connected layer and ReLU activation
-        x = F.relu(self.fc1(x))
-        # Apply second fully connected layer (output layer)
-        x = self.fc2(x)
-        return x
+        x = torch.relu(self.fc1(x))
+        x = self.dropout1(x)
+        x = torch.relu(self.fc2(x))
+        x = self.dropout2(x)
+        x = self.output(x)
+        return torch.softmax(x, dim=1)
 
 
 if __name__ == "__main__":
