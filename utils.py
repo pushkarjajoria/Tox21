@@ -401,6 +401,28 @@ def validate_model(model, valid_data_loader, criterion, device):
     return accuracy, precision, recall, f1, avg_val_loss
 
 
+def validate_hyper_model(model, valid_data_loader, criterion, device):
+    model.eval()  # Set model to evaluation mode
+    val_loss = 0.0
+
+    # Get the metrics using the test function
+    accuracy, precision, recall, f1 = test_mnist(valid_data_loader, model)
+
+    with torch.no_grad():
+        for data, target in valid_data_loader:
+            data, target = data.to(device), target.long().to(device)
+
+            # Forward pass
+            output = model(data)
+
+            # Calculate loss
+            loss = criterion(output, target)
+            val_loss += loss.item()
+
+    avg_val_loss = val_loss / len(valid_data_loader)  # Return average validation loss
+    return accuracy, precision, recall, f1, avg_val_loss
+
+
 def train_model_with_early_stopping(
         model, train_data_loader, valid_data_loader, criterion, optimizer, device, epochs, early_stopping_patience=5
 ):

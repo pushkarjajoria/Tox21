@@ -7,7 +7,7 @@ from tqdm import tqdm
 
 from eval import get_all_pred_and_labels_mnist
 from logger import custom_print
-from model import NoiseLayer, MNISTClassifier
+from model import NoiseLayer, MNISTClassifier, HybridModel
 from plots import plot_comparison_figure
 from utils import (test, get_class_distribution_and_weights, test_mnist, hybrid_train_mnist,
                    NoisedMNISTDataset, EarlyStopping, train_model_with_early_stopping, validate_model)
@@ -141,6 +141,7 @@ for NOISE_LEVEL in NOISE_LEVELS:
     early_stopping = EarlyStopping(patience=patience, verbose=True)
     for epoch in tqdm(range(epochs)):
         hybrid_train_mnist(train_data_loader, baseline_model, noisemodel, optim, noise_optimizer, criterion)
+        hybrid_model = HybridModel(baseline_model, noisemodel)
         val_accuracy, val_precision, val_recall, val_f1, av_val_loss = validate_model(baseline_model, val_data_loader,
                                                                                       criterion, device)
         early_stopping(av_val_loss, baseline_model)

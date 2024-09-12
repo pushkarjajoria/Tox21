@@ -85,6 +85,19 @@ class MolPropPredictor(nn.Module):
         return x
 
 
+class HybridModel(nn.Module):
+    def __init__(self, baseline_model, noising_channel):
+        super(HybridModel, self).__init__()
+        self.noising_channel = noising_channel
+        self.baseline_model = baseline_model
+
+    def forward(self, x):
+        out = self.baseline_model(x)
+        predictions = self.noising_channel(out)
+        return out, predictions
+
+
+
 class NoiseLayer(nn.Module):
     def __init__(self, theta, k):
         super(NoiseLayer, self).__init__()
