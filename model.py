@@ -94,8 +94,7 @@ class HybridModel(nn.Module):
     def forward(self, x):
         out = self.baseline_model(x)
         predictions = self.noising_channel(out)
-        return out, predictions
-
+        return predictions
 
 
 class NoiseLayer(nn.Module):

@@ -1,16 +1,14 @@
 import random
 import numpy as np
+import sklearn
 import torch
 from torch.utils.data import TensorDataset, DataLoader
 from sklearn.model_selection import StratifiedShuffleSplit
 from tqdm import tqdm
-
 from eval import get_all_pred_and_labels_mnist
-from logger import custom_print
 from model import NoiseLayer, MNISTClassifier, HybridModel
 from plots import plot_comparison_figure
-from utils import (test, get_class_distribution_and_weights, test_mnist, hybrid_train_mnist,
-                   NoisedMNISTDataset, EarlyStopping, train_model_with_early_stopping, validate_model)
+from utils import ( test_mnist, hybrid_train_mnist, EarlyStopping, train_model_with_early_stopping, validate_model)
 
 
 # Load MNIST data
@@ -28,6 +26,8 @@ patience = 4
 img_color, img_rows, img_cols = 1, 28, 28
 img_size = img_color * img_rows * img_cols
 seed = 42
+lr = 1e-3
+epochs = 50
 
 # Load and preprocess data
 (X_train, y_train), (X_test, y_test) = load_data(path="benchmark_datasets/mnist.npz")
@@ -83,15 +83,14 @@ for NOISE_LEVEL in NOISE_LEVELS:
 
     # Split data into training and validation sets
     train_idx, val_idx = next(
-        iter(StratifiedShuffleSplit(n_splits=1, test_size=0.1, random_state=seed).split(X_train, y_train_noise)))
+        iter(StratifiedShuffleSplit(n_splits=1, test_size=0.15, random_state=seed).split(X_train, y_train_noise)))
     X_train_train, y_train_train = X_train[train_idx], y_train_noise[train_idx]
     X_train_val, y_train_val = X_train[val_idx], y_train_noise[val_idx]
 
     # Model setup
     baseline_model = MNISTClassifier().to(device)
-    optim = torch.optim.Adam(baseline_model.parameters(), lr=1e-3)
+    optim = torch.optim.Adam(baseline_model.parameters(), lr=lr)
     criterion = torch.nn.CrossEntropyLoss().to(device)
-    epochs = 50
 
     # Prepare data loaders
     tensor_x_train = torch.Tensor(X_train_train)
@@ -121,30 +120,35 @@ for NOISE_LEVEL in NOISE_LEVELS:
 
     # Compute confusion matrix for channel weights
     baseline_output, y_train_noise = get_all_pred_and_labels_mnist(baseline_model, train_data_loader)
-    baseline_confusion = np.zeros((10, 10))
-    for n, p in zip(y_train_noise, baseline_output):
-        baseline_confusion[p, n] += 1.
+    baseline_confusion = sklearn.metrics.confusion_matrix(y_true=y_train_noise, y_pred=baseline_output)
 
     # Compute channel weights TODO: Check this part of the code!
-    channel_weights = baseline_confusion.copy()
-    channel_weights /= channel_weights.sum(axis=1, keepdims=True)
+    channel_weights = baseline_confusion.copy().astype(float)
+    if np.any(channel_weights.sum(axis=1, keepdims=True) == 0) or np.any(channel_weights.sum(axis=0, keepdims=True) == 0):
+        print("Channel weights sum should never be zero. Check!")
+        print(channel_weights)
+        print(baseline_confusion)
+        # raise ZeroDivisionError("Channel weights sum is 0 at some position")
+    channel_weights /= (channel_weights.sum(axis=1, keepdims=True))
     channel_weights = np.log(channel_weights + 1e-8)
     channel_weights = torch.from_numpy(channel_weights).float()
 
     # Setup noisy model
     noisemodel = NoiseLayer(theta=channel_weights.to(device), k=10)
-    noise_optimizer = torch.optim.Adam(noisemodel.parameters(), lr=1e-3)
+    noise_optimizer = torch.optim.Adam(noisemodel.parameters(), lr=lr)
 
     print("Noisy channel finished.")
 
     # Hybrid model training
     early_stopping = EarlyStopping(patience=patience, verbose=True)
+    BETA = 0.8
     for epoch in tqdm(range(epochs)):
         hybrid_train_mnist(train_data_loader, baseline_model, noisemodel, optim, noise_optimizer, criterion)
         hybrid_model = HybridModel(baseline_model, noisemodel)
-        val_accuracy, val_precision, val_recall, val_f1, av_val_loss = validate_model(baseline_model, val_data_loader,
-                                                                                      criterion, device)
-        early_stopping(av_val_loss, baseline_model)
+        _, _, _, _, av_val_loss_baseline = validate_model(baseline_model, val_data_loader, criterion, device)
+        _, _, _, _, av_val_loss_noise_model = validate_model(hybrid_model, val_data_loader, criterion, device)
+        validation_loss = (1-BETA) * av_val_loss_baseline + BETA * av_val_loss_noise_model
+        early_stopping(validation_loss, _)
         if early_stopping.early_stop:
             print("Early stopping triggered. Stopping training.")
             break
@@ -163,6 +167,15 @@ for NOISE_LEVEL in NOISE_LEVELS:
     baseline_f1.append(bl_f1)
     noise_layer_f1.append(f1)
 
+# Hyperparameter dictionary
+model_info = {
+    "Patience": patience,
+    "Learning Rate": lr,
+    "Epochs": epochs,
+    "Beta": BETA,
+    "Comments": "Axis Bug Fixed"
+}
+
 # Plot results
 plot_comparison_figure(
     noise_levels=NOISE_LEVELS,
@@ -173,5 +186,6 @@ plot_comparison_figure(
     baseline_recall=baseline_recall,
     noise_layer_recall=noise_layer_recall,
     baseline_f1=baseline_f1,
-    noise_layer_f1=noise_layer_f1
+    noise_layer_f1=noise_layer_f1,
+    model_info=model_info
 )
