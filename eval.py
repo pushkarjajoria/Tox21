@@ -22,8 +22,9 @@ def get_all_pred_and_labels(model, train_data_loader):
         labels = batch['label'].long().to(device)  # Labels should be of type long for CrossEntropyLoss
         output = model(x)
         pred = torch.argmax(output, dim=1).cpu()  # Apply threshold for binary classification
-        all_labels += labels
-        all_preds += pred
+        all_labels.extend(labels.cpu().numpy())  # Store true labels
+        all_preds.extend(pred.numpy())  # Store predicted labels
+
     return all_preds, all_labels
 
 

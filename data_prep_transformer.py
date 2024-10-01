@@ -43,6 +43,8 @@ class SmilesDataset(Dataset):
     def __getitem__(self, idx):
         return {'x': self.x[idx],  # Return "x" instead of "embedding"
                 'label': self.labels[idx]}
+
+
 def read_csv_property_file(filepath, cols_to_read):
     # Read the CSV file into a DataFrame
     df = pd.read_csv(filepath)

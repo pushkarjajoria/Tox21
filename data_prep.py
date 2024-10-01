@@ -41,7 +41,7 @@ class FingerprintDataset(Dataset):
         return len(self.smiles)
 
     def __getitem__(self, idx):
-        return {'x': torch.tensor(self.fingerprints[idx], dtype=torch.float),
+        return {'x': torch.tensor(self.x[idx], dtype=torch.float),
                 'label': torch.tensor(self.labels[idx], dtype=torch.float)}
 
 

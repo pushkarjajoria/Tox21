@@ -2,7 +2,7 @@ import random
 
 from numpy.testing import assert_array_almost_equal
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, random_split
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
@@ -160,6 +160,7 @@ def test(test_loader, model):
     print(f'Precision: {precision:.4f}')
     print(f'Recall: {recall:.4f}')
     print(f'F1 Score: {f1:.4f}')
+    return accuracy, precision, recall, f1
 
 
 def test_mnist(test_loader, model):
@@ -201,12 +202,14 @@ def accuracy(output, target):
     return acc
 
 
-def hybrid_train(train_loader, model, noisemodel, optimizer, noise_optimizer, criterion):
+def hybrid_train(train_loader, model, noisemodel, optimizer, noise_optimizer, criterion, BETA=0.):
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    BETA = 0.8
     model.train()
     noisemodel.train()
     for batch in train_loader:
+        optimizer.zero_grad()
+        noise_optimizer.zero_grad()
+
         x = batch['x'].float().to(device)
         labels = batch['label'].long().to(device)
         # set all gradient to zero
@@ -214,17 +217,58 @@ def hybrid_train(train_loader, model, noisemodel, optimizer, noise_optimizer, cr
         noise_optimizer.zero_grad()
         # forward propagation
         out = model(x)
-        predictions = noisemodel(out)
+        out_softmax = torch.nn.functional.softmax(out, dim=1)
+        predictions = noisemodel(out_softmax)
         # calculate loss and acc
         baseline_loss = criterion(out, labels)
         noise_model_loss = criterion(predictions, labels)
-        loss = (1 - BETA) * baseline_loss + BETA * noise_model_loss
+        loss = BETA * baseline_loss + (1-BETA) * noise_model_loss
 
         # back propagation
         loss.backward()
         # update the parameters (weights and biases)
         optimizer.step()
         noise_optimizer.step()
+
+
+def hybrid_train_mnist(train_loader, model, noisemodel, optimizer, noise_optimizer, criterion, BETA=0):
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    model.train()
+    noisemodel.train()
+
+    total_loss = 0  # Accumulator for total loss
+
+    for batch in train_loader:
+        x = batch[0].float().to(device)
+        labels = batch[1].long().to(device)
+
+        # Set all gradients to zero
+        optimizer.zero_grad()
+        noise_optimizer.zero_grad()
+
+        # Forward propagation
+        out = model(x)
+        out_softmax = torch.nn.functional.softmax(out, dim=1)
+        predictions = noisemodel(out_softmax)
+
+        # Calculate loss
+        baseline_loss = criterion(out, labels)
+        noise_model_loss = criterion(predictions, labels)
+        loss = BETA * baseline_loss + (1-BETA) * noise_model_loss
+
+        # Backward propagation
+        loss.backward()
+
+        # Update the parameters (weights and biases)
+        optimizer.step()
+        noise_optimizer.step()
+
+        # Accumulate loss for printing
+        total_loss += loss.item()
+
+    # Print the total loss for this epoch
+    avg_loss = total_loss / len(train_loader)
+    print(f'Epoch Loss: {avg_loss:.4f}')
 
 
 # Calculate and print percentage of positive test results
@@ -261,45 +305,6 @@ def get_class_distribution_and_weights(dataset, device):
     class_weights = torch.tensor(class_weights, dtype=torch.float32).to(device)
 
     return class_weights, total_samples
-
-
-def hybrid_train_mnist(train_loader, model, noisemodel, optimizer, noise_optimizer, criterion, BETA=1):
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    model.train()
-    noisemodel.train()
-
-    total_loss = 0  # Accumulator for total loss
-
-    for batch in train_loader:
-        x = batch[0].float().to(device)
-        labels = batch[1].long().to(device)
-
-        # Set all gradients to zero
-        optimizer.zero_grad()
-        noise_optimizer.zero_grad()
-
-        # Forward propagation
-        out = model(x)
-        predictions = noisemodel(out)
-
-        # Calculate loss
-        baseline_loss = criterion(out, labels)
-        noise_model_loss = criterion(predictions, labels)
-        loss = (1-BETA) * baseline_loss + BETA * noise_model_loss
-
-        # Backward propagation
-        loss.backward()
-
-        # Update the parameters (weights and biases)
-        optimizer.step()
-        noise_optimizer.step()
-
-        # Accumulate loss for printing
-        total_loss += loss.item()
-
-    # Print the total loss for this epoch
-    avg_loss = total_loss / len(train_loader)
-    print(f'Epoch Loss: {avg_loss:.4f}')
 
 
 def noisify_pairflip_mnist(y_train, noise, random_state=None, nb_classes=10):
@@ -398,6 +403,45 @@ def validate_model(model, valid_data_loader, criterion, device):
     return accuracy, precision, recall, f1, avg_val_loss
 
 
+def validation_loss(model, valid_data_loader, criterion, device):
+    model.eval()  # Set model to evaluation mode
+    val_loss = 0.0
+
+    with torch.no_grad():
+        for data, target in valid_data_loader:
+            data = data.to(device) if type(data) is not str else data
+            target = target.long().to(device)
+
+            # Forward pass
+            output = model(data)
+            # Calculate loss
+            loss = criterion(output, target)
+            val_loss += loss.item()
+
+    avg_val_loss = val_loss / len(valid_data_loader)  # Return average validation loss
+    return avg_val_loss
+
+
+def validation_loss_tox21(model, valid_data_loader, criterion, device):
+    model.eval()  # Set model to evaluation mode
+    val_loss = 0.0
+
+    with torch.no_grad():
+        for batch in valid_data_loader:
+            x = batch['x'].float().to(device)
+            labels = batch['label'].long().to(device)  # Labels should be of type long for CrossEntropyLoss
+
+            # Forward pass
+            output = model(x)
+
+            # Calculate loss
+            loss = criterion(output, labels)
+            val_loss += loss.item()
+
+    avg_val_loss = val_loss / len(valid_data_loader)  # Return average validation loss
+    return avg_val_loss
+
+
 def validate_hyper_model(model, valid_data_loader, criterion, device):
     model.eval()  # Set model to evaluation mode
     val_loss = 0.0
@@ -450,15 +494,10 @@ def train_model_with_early_stopping(
             running_loss += loss.item()
 
         # Validation Step
-        val_accuracy, val_precision, val_recall, val_f1, av_val_loss = validate_model(model, valid_data_loader,
-                                                                                   criterion, device)
+        av_val_loss = validation_loss(model, valid_data_loader, criterion, device)
         print(f'Epoch: {epoch + 1}/{epochs}, '
               f'Training Loss: {running_loss/len(train_data_loader):.4f}, '
-              f'Validation Loss: {av_val_loss:.4f}, '
-              f'Accuracy: {val_accuracy:.4f}, '
-              f'Precision: {val_precision:.4f}, '
-              f'Recall: {val_recall:.4f}, '
-              f'F1 Score: {val_f1:.4f}')
+              f'Validation Loss: {av_val_loss:.4f}, ')
 
         # Check early stopping
         early_stopping(av_val_loss, model)
@@ -467,3 +506,26 @@ def train_model_with_early_stopping(
             print("Early stopping triggered. Stopping training.")
             break
 
+
+def split_smile_dataset_train_validation(dataset, train_split_ratio=0.8, batch_size=32, validation_batch_size=1000):
+    # Separate positive and negative examples
+    positive_examples = [example for example in dataset if example['label'] == 1]  # + examples
+    negative_examples = [example for example in dataset if example['label'] == 0]  # - examples
+
+    # Calculate sizes for train/validation splits
+    num_pos_train = int(train_split_ratio * len(positive_examples))
+    num_neg_train = int(train_split_ratio * len(negative_examples))
+
+    # Split positive and negative examples into train and validation sets
+    train_pos, val_pos = random_split(positive_examples, [num_pos_train, len(positive_examples) - num_pos_train])
+    train_neg, val_neg = random_split(negative_examples, [num_neg_train, len(negative_examples) - num_neg_train])
+
+    # Combine positive and negative splits for final train and validation datasets
+    train_split = train_pos + train_neg
+    val_split = val_pos + val_neg
+
+    # Create data loaders
+    train_data_loader = DataLoader(dataset=train_split, batch_size=batch_size, shuffle=True)
+    val_data_loader = DataLoader(dataset=val_split, batch_size=validation_batch_size, shuffle=False)
+
+    return train_data_loader, val_data_loader

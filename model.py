@@ -74,13 +74,13 @@ class MolPropPredictor(nn.Module):
     def __init__(self, mol_inp_size):
         super().__init__()
         self.linear1 = nn.Linear(mol_inp_size, 256)
-        # self.linear2 = nn.Linear(128, 256)
-        self.linear3 = nn.Linear(in_features=256, out_features=2)
+        self.linear2 = nn.Linear(256, 128)
+        self.linear3 = nn.Linear(in_features=128, out_features=2)
         self.relu = nn.ReLU()
 
     def forward(self, x):
         x = self.relu(self.linear1(x))
-        # x = self.relu(self.linear2(x))
+        x = self.relu(self.linear2(x))
         x = self.linear3(x)
         return x
 
@@ -89,12 +89,18 @@ class HybridModel(nn.Module):
     def __init__(self, baseline_model, noising_channel):
         super(HybridModel, self).__init__()
         self.noising_channel = noising_channel
+        self.noising_channel.eval()
         self.baseline_model = baseline_model
+        self.baseline_model.eval()
+        self.activation = nn.Softmax(dim=1)
 
     def forward(self, x):
-        out = self.baseline_model(x)
-        predictions = self.noising_channel(out)
-        return predictions
+        self.eval()
+        with torch.no_grad():
+            out = self.baseline_model(x)
+            out = self.activation(out)
+            predictions = self.noising_channel(out)
+            return predictions
 
 
 class NoiseLayer(nn.Module):
@@ -113,6 +119,50 @@ class NoiseLayer(nn.Module):
         return out
 
 
+class Channel(nn.Module):
+    """
+    A PyTorch implementation of the Keras Channel layer suggested by the authors.
+
+    Based on the paper:
+    Goldberger & Ben-Reuven, Training deep neural-networks using a noise
+    adaptation layer, ICLR 2017.
+    https://openreview.net/forum?id=H12GRgcxg
+
+    Arguments:
+    - input_dim: int, the number of input dimensions (features).
+    - output_dim: int, optional (default is the same as input_dim).
+    - activation: activation function, default is softmax.
+    - theta: optional, custom weights to initialize the channel matrix.
+    """
+
+    def __init__(self, input_dim, output_dim=None, activation=F.softmax, theta=None):
+        super(Channel, self).__init__()
+        self.input_dim = input_dim
+        self.output_dim = output_dim if output_dim is not None else input_dim
+        self.activation = activation
+
+        # Initialize the channel matrix with custom weights (theta) if provided
+        if theta is not None:
+            self.channel_matrix = nn.Parameter(theta, requires_grad=True)
+        else:
+            self.channel_matrix = nn.Parameter(torch.randn(self.input_dim, self.output_dim), requires_grad=True)
+
+    def forward(self, x):
+        """
+        Forward pass through the layer. Computes the dot product between the input
+        and the channel matrix, applying the softmax to convert the channel matrix
+        to a probability matrix.
+
+        Arguments:
+        - x: The output of the baseline classifier with shape (batch_size, input_dim).
+        """
+        # Convert channel_matrix to a stochastic matrix
+        channel_matrix = self.activation(self.channel_matrix, dim=1)
+
+        # Perform dot product: batch_size x input_dim with input_dim x output_dim
+        return torch.matmul(x, channel_matrix)
+
+
 class MNISTClassifier(nn.Module):
     def __init__(self, img_size=28*28, nhiddens1=500, nhiddens2=300, nb_classes=10, DROPOUT=0.5):
         super(MNISTClassifier, self).__init__()
@@ -128,7 +178,7 @@ class MNISTClassifier(nn.Module):
         x = torch.relu(self.fc2(x))
         x = self.dropout2(x)
         x = self.output(x)
-        return torch.softmax(x, dim=1)
+        return x
 
 
 if __name__ == "__main__":
