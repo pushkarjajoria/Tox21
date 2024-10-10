@@ -133,7 +133,7 @@ class NoisedMNISTDataset(Dataset):
         return (self.dataset[idx][0], torch.tensor(self.noised_labels[idx], dtype=torch.int))
 
 
-def test(test_loader, model):
+def test(test_loader, model, fingerprint=True):
     all_preds = []
     all_labels = []
 
@@ -141,7 +141,10 @@ def test(test_loader, model):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     with torch.no_grad():
         for batch in test_loader:
-            x = batch['x'].float().to(device)
+            if fingerprint:
+                x = batch['x'].float().to(device)
+            else:
+                x = batch['x']
             labels = batch['label'].long().to(device)
             output = model(x)
             preds = torch.argmax(output, dim=1).cpu().numpy()  # Apply threshold for binary classification
@@ -202,7 +205,7 @@ def accuracy(output, target):
     return acc
 
 
-def hybrid_train(train_loader, model, noisemodel, optimizer, noise_optimizer, criterion, BETA=0.):
+def hybrid_train(train_loader, model, noisemodel, optimizer, noise_optimizer, criterion, BETA=0., fingerprint=True):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model.train()
     noisemodel.train()
@@ -210,7 +213,10 @@ def hybrid_train(train_loader, model, noisemodel, optimizer, noise_optimizer, cr
         optimizer.zero_grad()
         noise_optimizer.zero_grad()
 
-        x = batch['x'].float().to(device)
+        if fingerprint:
+            x = batch['x'].float().to(device)
+        else:
+            x = batch['x']
         labels = batch['label'].long().to(device)
         # set all gradient to zero
         optimizer.zero_grad()
@@ -422,13 +428,16 @@ def validation_loss(model, valid_data_loader, criterion, device):
     return avg_val_loss
 
 
-def validation_loss_tox21(model, valid_data_loader, criterion, device):
+def validation_loss_tox21(model, valid_data_loader, criterion, device, fingerprint=True):
     model.eval()  # Set model to evaluation mode
     val_loss = 0.0
 
     with torch.no_grad():
         for batch in valid_data_loader:
-            x = batch['x'].float().to(device)
+            if fingerprint:
+                x = batch['x'].float().to(device)
+            else:
+                x = batch['x']
             labels = batch['label'].long().to(device)  # Labels should be of type long for CrossEntropyLoss
 
             # Forward pass

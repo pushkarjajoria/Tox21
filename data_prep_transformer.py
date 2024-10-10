@@ -12,9 +12,7 @@ class SmilesDataset(Dataset):
         self.batch_size = batch_size
         self.smiles = []
         self.labels = []
-        self.x = []  # Reverting the name from "embeddings" to "x"
-
-        molformer = Molformer()
+        # self.x = []  # Reverting the name from "embeddings" to "x"
 
         # Load SMILES and labels
         with open(file_path, 'r') as f:
@@ -26,16 +24,8 @@ class SmilesDataset(Dataset):
                     self.smiles.append(smile)
                     self.labels.append(label)
 
-        # Process SMILES in batches
-        for i in range(0, len(self.smiles), self.batch_size):
-            batch_smiles = self.smiles[i:i + self.batch_size]
-            with torch.no_grad():
-                batch_x = molformer(batch_smiles)  # Use "batch_x" instead of "batch_embeddings"
-            self.x.append(batch_x.cpu())
-
-        # Flatten the list of tensors into a single tensor
-        self.x = torch.cat(self.x, dim=0)
         self.labels = torch.tensor(self.labels, dtype=torch.float32)
+        self.x = self.smiles
 
     def __len__(self):
         return len(self.smiles)

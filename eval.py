@@ -13,12 +13,15 @@ def multitask_auc(ground_truth, predicted):
     return np.mean(auc)
 
 
-def get_all_pred_and_labels(model, train_data_loader):
+def get_all_pred_and_labels(model, train_data_loader, fingerprint=True):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     all_labels = []
     all_preds = []
     for batch in train_data_loader:
-        x = batch['x'].float().to(device)
+        if fingerprint:
+            x = batch['x'].float().to(device)
+        else:
+            x = batch['x']
         labels = batch['label'].long().to(device)  # Labels should be of type long for CrossEntropyLoss
         output = model(x)
         pred = torch.argmax(output, dim=1).cpu()  # Apply threshold for binary classification

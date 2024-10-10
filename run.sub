@@ -2,8 +2,8 @@
 # Everything with a leading # is a comment
 
 universe                = docker
-docker_image            = pytorch/pytorch:2.4.1-cuda11.8-cudnn9-runtime
-initialdir              = /nethome/pjajoria/
+docker_image            = pushkarjajoria/noisy_labels:latest
+initialdir              = /nethome/pjajoria
 executable              = /nethome/pjajoria/Github/Tox21Noisy/run_hpc.sh
 output                  = /nethome/pjajoria/Github/Tox21Noisy/logfiles/run.sh.$(ClusterId).$(Year)_$(Month)_$(Day)_$(SUBMIT_TIME).out
 error                   = /nethome/pjajoria/Github/Tox21Noisy/logfiles/run.sh.$(ClusterId).$(Year)_$(Month)_$(Day)_$(SUBMIT_TIME).err

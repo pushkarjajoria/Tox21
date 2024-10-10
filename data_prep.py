@@ -1,9 +1,9 @@
 import pickle
 import numpy as np
-from openchem.data.utils import read_smiles_property_file
-from openchem.data.utils import get_tokens
+# from openchem.data.utils import read_smiles_property_file
+# from openchem.data.utils import get_tokens
 from sklearn.model_selection import train_test_split
-from openchem.data.utils import save_smiles_property_file
+# from openchem.data.utils import save_smiles_property_file
 from rdkit import Chem
 from rdkit.Chem import rdFingerprintGenerator
 from torch.utils.data import DataLoader

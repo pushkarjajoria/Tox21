@@ -102,11 +102,11 @@ def plot_comparison_figure(noise_levels, plot_name="baseline_vs_noise_adaptation
     plt.tight_layout(rect=(0, 0, 0.9, 1))  # Adjust to make room for the textbox
 
     current_time = datetime.now().strftime("%Y-%m-%d_%H-%M")
-    plot_name = f"plots/{plot_name}_{current_time}.png"
+    plot_name = f"/nethome/pjajoria/Github/Tox21Noisy/plots/{plot_name}_{current_time}.png"
 
     # Save the plot with the new name
     plt.savefig(plot_name)
-    plt.show()
+    # plt.show()
 
 
 if __name__ == "__main__":

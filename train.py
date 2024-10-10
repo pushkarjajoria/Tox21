@@ -1,9 +1,7 @@
 import random
-
 import sklearn
 from torch.utils.data import DataLoader
 
-from data_prep import FingerprintDataset
 # from data_prep import FingerprintDataset
 from data_prep_transformer import SmilesDataset
 from eval import get_all_pred_and_labels
@@ -21,11 +19,12 @@ print(f"Running the model on {device}")
 print(torch.version.cuda)
 
 patience = 5
-BETA = 0.2
+BETA = 0.0
 
 # Dataset preparation
-train_dataset = FingerprintDataset('./benchmark_datasets/tox21/train.smi')
-test_dataset = FingerprintDataset('./benchmark_datasets/tox21/test.smi')
+train_dataset = SmilesDataset('/nethome/pjajoria/Github/Tox21Noisy/benchmark_datasets/tox21/train.smi')
+test_dataset = SmilesDataset('/nethome/pjajoria/Github/Tox21Noisy/benchmark_datasets/tox21/test.smi')
+fingerprint = False if type(train_dataset) == SmilesDataset else True
 
 # train_dataset = SmilesDataset('./benchmark_datasets/tox21/train.smi')
 # test_dataset = SmilesDataset('./benchmark_datasets/tox21/test.smi')
@@ -39,12 +38,12 @@ multiple_seed_noise_layer_recall = []
 multiple_seed_baseline_f1 = []
 multiple_seed_noise_layer_f1 = []
 
-num_of_seeds = 5
+num_of_seeds = 3
 seeds = [42 + i for i in range(num_of_seeds)]
 
 
 # Using the noised dataset for training
-NOISE_LEVELS = np.linspace(0.0, 0.5, 11)
+NOISE_LEVELS = np.linspace(0.25, 0.5, 6)
 for i, seed in enumerate(seeds):
     print(f"Running for seed {i+1}/{len(seeds)}")
     # Metrics lists
@@ -82,7 +81,7 @@ for i, seed in enumerate(seeds):
 
         inp_size = len(train_dataset.x)
         # baseline_model = MolPropPredictorMolFormer().to(device)
-        baseline_model = MolPropPredictor(2048).to(device)
+        baseline_model = MolPropPredictorMolFormer().to(device)
         optim = torch.optim.Adam(baseline_model.parameters(), lr=1e-3)
         criterion = torch.nn.CrossEntropyLoss(weight=class_weights).to(device)  # Use CrossEntropyLoss
 
@@ -93,7 +92,10 @@ for i, seed in enumerate(seeds):
             baseline_model.train()
             running_loss = 0
             for batch in train_data_loader:
-                x = batch['x'].float().to(device)
+                if fingerprint:
+                    x = batch['x'].float().to(device) # Fingerprint Input
+                else:
+                    x = batch['x']  # Smile input
                 labels = batch['label'].long().to(device)  # Labels should be of type long for CrossEntropyLoss
                 optim.zero_grad()
                 output = baseline_model(x)
@@ -102,7 +104,7 @@ for i, seed in enumerate(seeds):
                 optim.step()
                 running_loss += loss.item()
 
-            av_val_loss = validation_loss_tox21(baseline_model, valid_data_loader, criterion, device)
+            av_val_loss = validation_loss_tox21(baseline_model, valid_data_loader, criterion, device, fingerprint=fingerprint)
             print(f'Epoch: {epoch + 1}/{epochs}, '
                   f'Training Loss: {running_loss/len(train_data_loader):.4f}, '
                   f'Validation Loss: {av_val_loss:.4f}, ')
@@ -115,9 +117,9 @@ for i, seed in enumerate(seeds):
                 break
 
         print(f"Baseline {NOISE_LEVEL*100}% Noise")
-        bl_accuracy, bl_precision, bl_recall, bl_f1 = test(test_data_loader, baseline_model)
+        bl_accuracy, bl_precision, bl_recall, bl_f1 = test(test_data_loader, baseline_model, fingerprint=fingerprint)
 
-        baseline_output, y_train_noise = get_all_pred_and_labels(baseline_model, train_data_loader)
+        baseline_output, y_train_noise = get_all_pred_and_labels(baseline_model, train_data_loader, fingerprint=fingerprint)
         baseline_confusion = sklearn.metrics.confusion_matrix(y_true=y_train_noise, y_pred=baseline_output)
 
         channel_weights = baseline_confusion.T.copy().astype(float)
@@ -133,10 +135,10 @@ for i, seed in enumerate(seeds):
 
         # noisy model train and test
         for epoch in tqdm(range(epochs)):
-            hybrid_train(train_data_loader, baseline_model, noisemodel, optim, noise_optimizer, criterion, BETA=BETA)
+            hybrid_train(train_data_loader, baseline_model, noisemodel, optim, noise_optimizer, criterion, BETA=BETA, fingerprint=fingerprint)
             hybrid_model = HybridModel(baseline_model, noisemodel)
-            av_val_loss_baseline = validation_loss_tox21(baseline_model, valid_data_loader, criterion, device)
-            av_val_loss_noise_model = validation_loss_tox21(hybrid_model, valid_data_loader, criterion, device)
+            av_val_loss_baseline = validation_loss_tox21(baseline_model, valid_data_loader, criterion, device, fingerprint=fingerprint)
+            av_val_loss_noise_model = validation_loss_tox21(hybrid_model, valid_data_loader, criterion, device, fingerprint=fingerprint)
             validation_loss = BETA * av_val_loss_baseline + (1 - BETA) * av_val_loss_noise_model
             early_stopping(validation_loss, None)
             if early_stopping.early_stop:
@@ -144,7 +146,7 @@ for i, seed in enumerate(seeds):
                 break
 
         print(f"After hybrid, test acc {NOISE_LEVEL*100}% Noise: ")
-        accuracy, precision, recall, f1 = test(test_data_loader, baseline_model)
+        accuracy, precision, recall, f1 = test(test_data_loader, baseline_model, fingerprint=fingerprint)
         print("Finished hybrid training.")
 
         # Collect metrics
@@ -178,7 +180,7 @@ model_info = {
 # Plot results
 plot_comparison_figure(
     noise_levels=NOISE_LEVELS,
-    plot_name="Tox21-Fingerprint_baseline_vs_noise_adaptation",
+    plot_name="HPC-Tox21-Molformer-Finetuning-with-NAL",
     baseline_accuracy=multiple_seed_baseline_accuracy,
     noise_layer_accuracy=multiple_seed_noise_layer_accuracy,
     baseline_precision=multiple_seed_baseline_precision,
@@ -189,4 +191,3 @@ plot_comparison_figure(
     noise_layer_f1=multiple_seed_noise_layer_f1,
     model_info=model_info
 )
-
