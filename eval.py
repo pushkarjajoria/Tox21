@@ -13,16 +13,38 @@ def multitask_auc(ground_truth, predicted):
     return np.mean(auc)
 
 
-def get_all_pred_and_labels(model, train_data_loader):
+def get_all_pred_and_labels(model, train_data_loader, fingerprint=True):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     all_labels = []
     all_preds = []
     for batch in train_data_loader:
-        x = batch['fingerprint'].float().to(device)
+        if fingerprint:
+            x = batch['x'].float().to(device)
+        else:
+            x = batch['x']
         labels = batch['label'].long().to(device)  # Labels should be of type long for CrossEntropyLoss
         output = model(x)
         pred = torch.argmax(output, dim=1).cpu()  # Apply threshold for binary classification
-        all_labels += labels
-        all_preds += pred
+        all_labels.extend(labels.cpu().numpy())  # Store true labels
+        all_preds.extend(pred.numpy())  # Store predicted labels
+
     return all_preds, all_labels
 
+
+def get_all_pred_and_labels_mnist(model, train_data_loader):
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    all_labels = []
+    all_preds = []
+
+    model.eval()  # Set model to evaluation mode (disable dropout, batch norm, etc.)
+
+    with torch.no_grad():  # Disable gradient computation
+        for batch in train_data_loader:
+            x = batch[0].float().to(device)  # Use batch[0] for input images (MNIST)
+            labels = batch[1].long().to(device)  # Use batch[1] for labels (MNIST)
+            output = model(x)
+            preds = torch.argmax(output, dim=1).cpu()  # Get predicted class index
+            all_labels.extend(labels.cpu().numpy())  # Store true labels
+            all_preds.extend(preds.numpy())  # Store predicted labels
+
+    return all_preds, all_labels

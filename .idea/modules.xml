@@ -2,7 +2,6 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/../OpenChem/.idea/OpenChem.iml" filepath="$PROJECT_DIR$/../OpenChem/.idea/OpenChem.iml" />
       <module fileurl="file://$PROJECT_DIR$/.idea/Tox21Noisy.iml" filepath="$PROJECT_DIR$/.idea/Tox21Noisy.iml" />
     </modules>
   </component>
