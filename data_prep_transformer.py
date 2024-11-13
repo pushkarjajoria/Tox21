@@ -35,6 +35,34 @@ class SmilesDataset(Dataset):
                 'label': self.labels[idx]}
 
 
+class Tox21SmilesDataset(Dataset):
+    def __init__(self, file_path, batch_size=32):
+        self.batch_size = batch_size
+        self.smiles = []
+        self.labels = []
+        # self.x = []  # Reverting the name from "embeddings" to "x"
+
+        # Load SMILES and labels
+        with open(file_path, 'r') as f:
+            for line in f:
+                parts = line.strip().split(',')
+                if len(parts) > 1:
+                    smile = parts[0]
+                    label = int(parts[1])
+                    self.smiles.append(smile)
+                    self.labels.append(label)
+
+        self.labels = torch.tensor(self.labels, dtype=torch.float32)
+        self.x = self.smiles
+
+    def __len__(self):
+        return len(self.smiles)
+
+    def __getitem__(self, idx):
+        return {'x': self.x[idx],  # Return "x" instead of "embedding"
+                'label': self.labels[idx]}
+
+
 def read_csv_property_file(filepath, cols_to_read):
     # Read the CSV file into a DataFrame
     df = pd.read_csv(filepath)

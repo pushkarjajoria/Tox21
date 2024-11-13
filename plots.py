@@ -1,3 +1,4 @@
+import pickle
 import numpy as np
 import matplotlib.pyplot as plt
 from datetime import datetime
@@ -109,94 +110,127 @@ def plot_comparison_figure(noise_levels, plot_name="baseline_vs_noise_adaptation
     # plt.show()
 
 
+def plot_results(results_dict):
+    try:
+        num_seeds = results_dict["num_seed"]
+        noise_levels = results_dict["noise_levels"]
+    except KeyError:
+        noise_levels = [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.50]
+        num_seeds = 3
+    tasks = ['SR-HSE', 'NR-AR', 'SR-ARE', 'NR-Aromatase', 'NR-ER-LBD', 'NR-AhR',
+             'SR-MMP', 'NR-ER', 'NR-PPAR-gamma', 'SR-p53', 'SR-ATAD5', 'NR-AR-LBD']
+    num_noise_levels = len(noise_levels)
+    # Prepare data for plotting
+    baseline_f1 = np.array(
+        [[[results_dict['baseline_f1'][seed][noise][task] for task in tasks] for noise in range(num_noise_levels)] for seed in
+         range(num_seeds)])
+    noise_f1 = np.array(
+        [[[results_dict['noise_layer_f1'][seed][noise][task] for task in tasks] for noise in range(num_noise_levels)] for seed in
+         range(num_seeds)])
+
+    baseline_roc_auc = np.array(
+        [[[results_dict['baseline_roc_auc'][seed][noise][task] for task in tasks] for noise in range(num_noise_levels)] for seed in
+         range(num_seeds)])
+    noise_roc_auc = np.array(
+        [[[results_dict['noise_layer_roc_auc'][seed][noise][task] for task in tasks] for noise in range(num_noise_levels)] for seed in
+         range(num_seeds)])
+
+    # Plot 1: Average F1 and ROC-AUC across noise levels (with error bars for seeds)
+    plt.figure(figsize=(12, 6))
+
+    # Subplot 1: F1
+    plt.subplot(1, 2, 1)
+    baseline_f1_mean = baseline_f1.mean(axis=(2, 0))  # Average over tasks and seeds
+    baseline_f1_std = baseline_f1.std(axis=(2, 0))  # Std over seeds
+
+    noise_f1_mean = noise_f1.mean(axis=(2, 0))
+    noise_f1_std = noise_f1.std(axis=(2, 0))
+
+    plt.errorbar(noise_levels, baseline_f1_mean, yerr=baseline_f1_std, label='Baseline F1', fmt='-o')
+    plt.errorbar(noise_levels, noise_f1_mean, yerr=noise_f1_std, label='Noise Layer F1', fmt='-o')
+    plt.xlabel('Noise Level')
+    plt.ylabel('Average F1')
+    plt.title('Average F1 Across Noise Levels')
+    plt.legend()
+
+    # Subplot 2: ROC AUC
+    plt.subplot(1, 2, 2)
+    baseline_roc_auc_mean = baseline_roc_auc.mean(axis=(2, 0))  # Average over tasks and seeds
+    baseline_roc_auc_std = baseline_roc_auc.std(axis=(2, 0))  # Std over seeds
+
+    noise_roc_auc_mean = noise_roc_auc.mean(axis=(2, 0))
+    noise_roc_auc_std = noise_roc_auc.std(axis=(2, 0))
+
+    plt.errorbar(noise_levels, baseline_roc_auc_mean, yerr=baseline_roc_auc_std, label='Baseline ROC-AUC', fmt='-o')
+    plt.errorbar(noise_levels, noise_roc_auc_mean, yerr=noise_roc_auc_std, label='Noise Layer ROC-AUC', fmt='-o')
+    plt.xlabel('Noise Level')
+    plt.ylabel('Average ROC-AUC')
+    plt.title('Average ROC-AUC Across Noise Levels')
+    plt.legend()
+
+    plt.tight_layout()
+    plt.show()
+
+    # Plot 2: Per-task statistics (12 subplots)
+    fig, axes = plt.subplots(3, 4, figsize=(20, 15))
+    fig.suptitle('Per Task F1 across Noise Levels', fontsize=16)
+
+    for i, task in enumerate(tasks):
+        row, col = divmod(i, 4)
+
+        # Plot for each task
+        ax = axes[row, col]
+        baseline_f1_task_mean = baseline_f1[:, :, i].mean(axis=0)
+        baseline_f1_task_std = baseline_f1[:, :, i].std(axis=0)
+
+        noise_f1_task_mean = noise_f1[:, :, i].mean(axis=0)
+        noise_f1_task_std = noise_f1[:, :, i].std(axis=0)
+
+        ax.errorbar(noise_levels, baseline_f1_task_mean, yerr=baseline_f1_task_std, label='Baseline F1', fmt='-o')
+        ax.errorbar(noise_levels, noise_f1_task_mean, yerr=noise_f1_task_std, label='Noise Layer F1', fmt='-o')
+
+        ax.set_title(f'Task: {task}')
+        ax.set_xlabel('Noise Level')
+        ax.set_ylabel('F1 Score')
+
+    plt.legend()
+    plt.tight_layout(rect=[0, 0, 1, 0.95])
+    plt.show()
+
+    # Plot 3: Per-task ROC-AUC (12 subplots)
+    fig, axes = plt.subplots(3, 4, figsize=(20, 15))
+    fig.suptitle('Per Task ROC-AUC across Noise Levels', fontsize=16)
+
+    for i, task in enumerate(tasks):
+        row, col = divmod(i, 4)
+
+        # Plot for each task
+        ax = axes[row, col]
+        baseline_roc_auc_task_mean = baseline_roc_auc[:, :, i].mean(axis=0)
+        baseline_roc_auc_task_std = baseline_roc_auc[:, :, i].std(axis=0)
+
+        noise_roc_auc_task_mean = noise_roc_auc[:, :, i].mean(axis=0)
+        noise_roc_auc_task_std = noise_roc_auc[:, :, i].std(axis=0)
+
+        ax.errorbar(noise_levels, baseline_roc_auc_task_mean, yerr=baseline_roc_auc_task_std, label='Baseline ROC-AUC',
+                    fmt='-o')
+        ax.errorbar(noise_levels, noise_roc_auc_task_mean, yerr=noise_roc_auc_task_std, label='Noise Layer ROC-AUC',
+                    fmt='-o')
+
+        ax.set_title(f'Task: {task}')
+        ax.set_xlabel('Noise Level')
+        ax.set_ylabel('ROC-AUC')
+
+    plt.legend()
+    plt.tight_layout(rect=[0, 0, 1, 0.95])
+    plt.show()
+
+
+# Example usage
+# plot_results(results_dict)  # Call this function with your results dict
+
+
 if __name__ == "__main__":
-    # Updated noise levels
-    NOISE_LEVELS = np.linspace(0.2, 0.5, 6)
-    # Define the number of noise levels and seeds
-    num_noise_levels = 6
-    num_seeds = 5
-
-    # Adjusted dummy values for baseline accuracy with performance decreasing across noise levels for each seed
-    multiple_seed_baseline_accuracy = [
-        [88, 83, 78, 72, 67, 62],  # Seed 1
-        [87, 82, 77, 71, 66, 61],  # Seed 2
-        [86, 81, 76, 70, 65, 60],  # Seed 3
-        [84, 79, 75, 69, 64, 59],  # Seed 4
-        [85, 80, 74, 71, 66, 63]  # Seed 5
-    ]
-
-    # Adjusted dummy values for noise layer accuracy
-    multiple_seed_noise_layer_accuracy = [
-        [85, 80, 75, 70, 65, 60],  # Seed 1
-        [84, 79, 74, 69, 64, 59],  # Seed 2
-        [83, 78, 73, 68, 63, 58],  # Seed 3
-        [82, 76, 72, 67, 62, 57],  # Seed 4
-        [83, 77, 74, 69, 66, 61]  # Seed 5
-    ]
-
-    # Adjusted dummy values for baseline precision
-    multiple_seed_baseline_precision = [
-        [0.88, 0.83, 0.78, 0.73, 0.68, 0.63],  # Seed 1
-        [0.87, 0.82, 0.77, 0.72, 0.67, 0.62],  # Seed 2
-        [0.86, 0.81, 0.76, 0.71, 0.66, 0.61],  # Seed 3
-        [0.84, 0.79, 0.75, 0.70, 0.65, 0.60],  # Seed 4
-        [0.85, 0.80, 0.74, 0.71, 0.66, 0.63]  # Seed 5
-    ]
-
-    # Adjusted dummy values for noise layer precision
-    multiple_seed_noise_layer_precision = [
-        [0.85, 0.80, 0.75, 0.70, 0.65, 0.60],  # Seed 1
-        [0.84, 0.79, 0.74, 0.69, 0.64, 0.59],  # Seed 2
-        [0.83, 0.78, 0.73, 0.68, 0.63, 0.58],  # Seed 3
-        [0.82, 0.76, 0.72, 0.67, 0.62, 0.57],  # Seed 4
-        [0.83, 0.77, 0.74, 0.69, 0.66, 0.61]  # Seed 5
-    ]
-
-    # Adjusted dummy values for baseline recall
-    multiple_seed_baseline_recall = [
-        [0.88, 0.83, 0.78, 0.73, 0.68, 0.63],  # Seed 1
-        [0.87, 0.82, 0.77, 0.72, 0.67, 0.62],  # Seed 2
-        [0.86, 0.81, 0.76, 0.71, 0.66, 0.61],  # Seed 3
-        [0.84, 0.79, 0.75, 0.70, 0.65, 0.60],  # Seed 4
-        [0.85, 0.80, 0.74, 0.71, 0.66, 0.63]  # Seed 5
-    ]
-
-    # Adjusted dummy values for noise layer recall
-    multiple_seed_noise_layer_recall = [
-        [0.85, 0.80, 0.75, 0.70, 0.65, 0.60],  # Seed 1
-        [0.84, 0.79, 0.74, 0.69, 0.64, 0.59],  # Seed 2
-        [0.83, 0.78, 0.73, 0.68, 0.63, 0.58],  # Seed 3
-        [0.82, 0.76, 0.72, 0.67, 0.62, 0.57],  # Seed 4
-        [0.83, 0.77, 0.74, 0.69, 0.66, 0.61]  # Seed 5
-    ]
-
-    # Adjusted dummy values for baseline F1 score
-    multiple_seed_baseline_f1 = [
-        [0.88, 0.83, 0.78, 0.73, 0.68, 0.63],  # Seed 1
-        [0.87, 0.82, 0.77, 0.72, 0.67, 0.62],  # Seed 2
-        [0.86, 0.81, 0.76, 0.71, 0.66, 0.61],  # Seed 3
-        [0.84, 0.79, 0.75, 0.70, 0.65, 0.60],  # Seed 4
-        [0.85, 0.80, 0.74, 0.71, 0.66, 0.63]  # Seed 5
-    ]
-
-    # Adjusted dummy values for noise layer F1 score
-    multiple_seed_noise_layer_f1 = [
-        [0.85, 0.80, 0.75, 0.70, 0.65, 0.60],  # Seed 1
-        [0.84, 0.79, 0.74, 0.69, 0.64, 0.59],  # Seed 2
-        [0.83, 0.78, 0.73, 0.68, 0.63, 0.58],  # Seed 3
-        [0.82, 0.76, 0.72, 0.67, 0.62, 0.57],  # Seed 4
-        [0.83, 0.77, 0.74, 0.69, 0.66, 0.61]  # Seed 5
-    ]
-
-    plot_comparison_figure(
-        noise_levels=NOISE_LEVELS,
-        baseline_accuracy=multiple_seed_baseline_accuracy,
-        noise_layer_accuracy=multiple_seed_noise_layer_accuracy,
-        baseline_precision=multiple_seed_baseline_precision,
-        noise_layer_precision=multiple_seed_noise_layer_precision,
-        baseline_recall=multiple_seed_baseline_recall,
-        noise_layer_recall=multiple_seed_noise_layer_recall,
-        baseline_f1=multiple_seed_baseline_f1,
-        noise_layer_f1=multiple_seed_noise_layer_f1,
-        model_info={"Comments": "Testing with transposed noise-influenced performance"}
-    )
+    with open("/nethome/pjajoria/Github/Tox21Noisy/outputs/result_pickles/results_pickle_2024-10-17_16-20.pkl", "rb") as f:
+        results = pickle.load(f)
+    plot_results(results)
