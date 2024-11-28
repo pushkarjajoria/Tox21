@@ -2,10 +2,6 @@ import pickle
 import numpy as np
 import pandas as pd
 from sklearn.decomposition import PCA
-# from openchem.data.utils import read_smiles_property_file
-# from openchem.data.utils import get_tokens
-from sklearn.model_selection import train_test_split
-# from openchem.data.utils import save_smiles_property_file
 from rdkit import Chem
 from rdkit.Chem import rdFingerprintGenerator
 from torch.utils.data import DataLoader
@@ -41,6 +37,7 @@ def get_cv_splits(cv_df, num_folds, fold_col):
 def create_train_test_val_splits(file_path):
     # Load the CSV file
     data = pd.read_csv(file_path, index_col=0)
+    print(data[0:1].to_string())
 
     # Convert SMILES to Morgan fingerprints
     data["morgan_fp"] = list(map(smiles_to_morgan_fingerprint, data['smiles'].values))

@@ -8,8 +8,32 @@ executable              = /nethome/pjajoria/Github/Tox21Noisy/run_hpc.sh
 output                  = /nethome/pjajoria/Github/Tox21Noisy/logfiles/run.sh.$(ClusterId).$(Year)_$(Month)_$(Day)_$(SUBMIT_TIME).out
 error                   = /nethome/pjajoria/Github/Tox21Noisy/logfiles/run.sh.$(ClusterId).$(Year)_$(Month)_$(Day)_$(SUBMIT_TIME).err
 log                     = /nethome/pjajoria/Github/Tox21Noisy/logfiles/run.sh.$(ClusterId).$(Year)_$(Month)_$(Day)_$(SUBMIT_TIME).log
-request_CPUs            = 1
-request_memory          = 16G
-request_GPUs            = 1
-requirements            = (GPUs_GlobalMemoryMb >= 16000) && (machine == "cl17lx.lsv.uni-saarland.de")
-queue
+request_CPUs            = 8
+request_memory          = 160G
+
+# Files for cl13lx (Set 1)
+requirements            = (Machine == "cl13lx.lsv.uni-saarland.de")
+arguments               = /data/corpora/enamine/Enamine_REAL_HAC_27_872M_CXSMILES.cxsmiles.bz2 /data/corpora/enamine/with_fingerprint/Enamine_REAL_HAC_27_872M_CXSMILES.parquet
+queue 1
+arguments               = /data/corpora/enamine/Enamine_REAL_HAC_29_38_1.3B_Part_1_CXSMILES.cxsmiles.bz2 /data/corpora/enamine/with_fingerprint/Enamine_REAL_HAC_29_38_1.3B_Part_1_CXSMILES.parquet
+queue 1
+arguments               = /data/corpora/enamine/Enamine_REAL_HAC_24_394M_CXSMILES.cxsmiles.bz2 /data/corpora/enamine/with_fingerprint/Enamine_REAL_HAC_24_394M_CXSMILES.parquet
+queue 1
+
+# Files for cl14lx (Set 2)
+requirements            = (Machine == "cl14lx.lsv.uni-saarland.de")
+arguments               = /data/corpora/enamine/Enamine_REAL_HAC_28_803M_CXSMILES.cxsmiles.bz2 /data/corpora/enamine/with_fingerprint/Enamine_REAL_HAC_28_803M_CXSMILES.parquet
+queue 1
+arguments               = /data/corpora/enamine/Enamine_REAL_HAC_29_38_1.3B_Part_2_CXSMILES.cxsmiles.bz2 /data/corpora/enamine/with_fingerprint/Enamine_REAL_HAC_29_38_1.3B_Part_2_CXSMILES.parquet
+queue 1
+arguments               = /data/corpora/enamine/Enamine_REAL_HAC_6_21_420M_CXSMILES.cxsmiles.bz2 /data/corpora/enamine/with_fingerprint/Enamine_REAL_HAC_6_21_420M_CXSMILES.parquet
+queue 1
+
+# Files for cl15lx (Set 3)
+requirements            = (Machine == "cl15lx.lsv.uni-saarland.de")
+arguments               = /data/corpora/enamine/Enamine_REAL_HAC_26_766M_CXSMILES.cxsmiles.bz2 /data/corpora/enamine/with_fingerprint/Enamine_REAL_HAC_26_766M_CXSMILES.parquet
+queue 1
+arguments               = /data/corpora/enamine/Enamine_REAL_HAC_25_789M_CXSMILES.cxsmiles.bz2 /data/corpora/enamine/with_fingerprint/Enamine_REAL_HAC_25_789M_CXSMILES.parquet
+queue 1
+arguments               = /data/corpora/enamine/Enamine_REAL_HAC_22_23_471M_CXSMILES.cxsmiles.bz2 /data/corpora/enamine/with_fingerprint/Enamine_REAL_HAC_22_23_471M_CXSMILES.parquet
+queue 1

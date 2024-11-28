@@ -55,6 +55,8 @@ test_data_loader = DataLoader(dataset=test_dataset, batch_size=1000, shuffle=Fal
 
 train_positive_percentage = calculate_positive_percentage(train_dataset)
 test_positive_percentage = calculate_positive_percentage(test_dataset)
+print(f"Len of Train: {len(train_dataset)}")
+print(f"Len of Test: {len(test_dataset)}")
 print(f'Percentage of positive test results in training dataset: {train_positive_percentage}%')
 print(f'Percentage of positive test results in testing dataset: {test_positive_percentage}%')
 

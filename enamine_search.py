@@ -1,56 +1,99 @@
-import pandas as pd  # for typehinting below
-from sklearn.ensemble import RandomForestClassifier
-from smallworld_api import SmallWorld, NoMatchError
-from IPython.display import display
+import pandas as pd
+import time
+import os
+import requests
+from tqdm import tqdm
 
-data_path = 'benchmark_datasets/CACHE5/20240430_MCHR1_splitted_RJ.csv'
-data = pd.read_csv(data_path, index_col=0)
-train_folds = [f"Fold_{i}" for i in [0, 1, 2, 3, 5, 6, 7]]
-train_data = data[data["DataSAIL_10f"].isin(train_folds)]
 
-smiles = train_data['smiles']
+# Create outputs directory if it doesn't exist
+OUTPUT_DIR = "outputs"
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-smiles = smiles.values
-global_results = []  # Global list to store results
+# Constants
+DATA_PATH = 'benchmark_datasets/CACHE5/20240430_MCHR1_splitted_RJ.csv'
+API_RETRY_LIMIT = 5  # Maximum retries for connection failures
+MAX_BACKOFF_TIME = 60  # Maximum backoff time in seconds (1 minute)
 
-for smile in smiles:
-    print(f"Molecules similar to {smile}:")
-    sw = SmallWorld()
-    try:
-        results: pd.DataFrame = sw.search(smile, dist=5, db=sw.REAL_dataset)
-        global_results.append(results)  # Append results to global list
-        display(results)
-    except Exception as e:
-        print(f"No match found for {smile}. Error: {e}")
 
-if global_results:
-    combined_results = pd.concat(global_results, ignore_index=True)
-else:
-    combined_results = pd.DataFrame()  # Fallback in case global_results is empty
+def find_similar_pubchem(smiles, threshold=0.8):
+    base_url = "https://pubchem.ncbi.nlm.nih.gov/rest/pug/"
+    similarity_url = f"{base_url}compound/similarity/smiles/JSON"
+    params = {
+        "smiles": smiles,
+        "Threshold": int(threshold * 100)  # Threshold must be between 0-100
+    }
 
-# Check if there are valid data points to label
-if not combined_results.empty:
-    # Prepare features for prediction
-    # Replace 'feature_columns' with actual column names from combined_results
-    feature_columns = [col for col in combined_results.columns if col != 'target']  # Assuming 'target' isn't a feature
-    features = combined_results[feature_columns]
+    retries = 0
+    while retries < API_RETRY_LIMIT:
+        try:
+            response = requests.get(similarity_url, params=params, timeout=10)
+            if response.status_code == 202:  # Request accepted but not completed
+                list_key = response.json()["Waiting"]["ListKey"]
+                while True:
+                    poll_url = f"{base_url}compound/listkey/{list_key}/JSON"
+                    poll_response = requests.get(poll_url, timeout=10)
+                    if poll_response.status_code == 200:
+                        return poll_response.json()
+                    elif poll_response.status_code == 202:
+                        print("No Response yet. Waiting 5 seconds")
+                        time.sleep(5)  # Wait before retrying
+                    else:
+                        return f"Error: {poll_response.status_code} - {poll_response.text}"
+            elif response.status_code == 200:
+                return response.json()
+            else:
+                print(f"Error: {response.status_code} - {response.text}")
+                break  # Do not retry for non-retryable errors
+        except requests.exceptions.RequestException as e:
+            retries += 1
+            backoff_time = min(2 ** retries, MAX_BACKOFF_TIME)
+            print(f"Retry {retries}/{API_RETRY_LIMIT}: {e}. Retrying in {backoff_time} seconds...")
+            time.sleep(backoff_time)
+    print(f"Failed to fetch data for SMILES: {smiles} after {API_RETRY_LIMIT} retries.")
+    return None
 
-    # Load the pretrained model
-    # Replace this with actual code to load the trained model (e.g., using joblib or pickle)
-    # Example:
-    # from joblib import load
-    # model = load('best_model.joblib')
-    model = RandomForestClassifier(n_estimators=100, max_depth=5, random_state=0)  # Placeholder, use your best model
 
-    # Generate labels
-    labels = model.predict(features)
+if __name__ == "__main__":
 
-    # Add labels to the DataFrame
-    combined_results['predicted_label'] = labels
+    # Constants
+    DATA_PATH = 'benchmark_datasets/CACHE5/20240430_MCHR1_splitted_RJ.csv'
 
-    # Display or save the labeled data
-    print("Labeled Results:")
-    print(combined_results.head(5))
-    # combined_results.to_csv("labeled_results.csv", index=False)  # Optional: Save to CSV
-else:
-    print("No data available for labeling.")
+    # Load the dataset
+    data = pd.read_csv(DATA_PATH, index_col=0)
+    train_folds = [f"Fold_{i}" for i in [0, 1, 2, 3, 5, 6, 7]]
+    train_data = data[data["DataSAIL_10f"].isin(train_folds)]
+
+    smiles = train_data['smiles'].values
+
+    # Sanity test with a subset of the dataset
+    sanity_smiles = smiles[:10]
+    similar_smiles_mapping = []
+    threshold = 0.5
+
+    for smile_query in tqdm(sanity_smiles, desc="Processing SMILES"):
+        result = find_similar_pubchem(smile_query, threshold)
+        if result and isinstance(result, dict):
+            smiles_list = []
+            for compound in result.get("PC_Compounds", []):
+                for prop in compound.get("props", []):
+                    if prop.get("urn", {}).get("label") == "SMILES":
+                        smiles_list.append(prop["value"]["sval"])
+            similar_smiles_mapping.append({
+                "query_smiles": smile_query,
+                "similar_smiles": smiles_list
+            })
+
+    # Save similar SMILES and mappings to files
+    output_file_smiles = os.path.join(OUTPUT_DIR, "sanity_test_similar_smiles.csv")
+    output_file_mapping = os.path.join(OUTPUT_DIR, "sanity_test_smiles_mapping.csv")
+
+    # Save as DataFrame
+    pd.DataFrame(similar_smiles_mapping).to_csv(output_file_mapping, index=False)
+
+    # For simplicity, save all similar smiles as a single list (flattened)
+    all_similar_smiles = [smile for entry in similar_smiles_mapping for smile in entry["similar_smiles"]]
+    pd.DataFrame({"similar_smiles": all_similar_smiles}).to_csv(output_file_smiles, index=False)
+
+    print(f"Sanity test completed. Results saved in '{OUTPUT_DIR}'.")
+
+
