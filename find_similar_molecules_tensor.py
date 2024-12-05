@@ -136,3 +136,23 @@ if __name__ == "__main__":
 
     heap_dict = {"files_list": all_parquet_files, "heap_dict": heap_dict}
     save_pickle(heap_dict)
+
+
+"""
+import torch
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+# Example shapes
+n_bits = 1024  # Number of bits in each vector
+A = torch.randint(0, 2, (2200, n_bits)).to(device) == 1 # Set A
+B = torch.randint(0, 2, (100, n_bits)).to(device) == 1# Simulating a batch from Set B
+batch_a, batch_b = A.shape[-2], B.shape[-2]
+
+A_intersection_B = torch.logical_and(A.unsqueeze(1), B.unsqueeze(0)).sum(dim=2)
+
+sum_A = torch.sum(A, dim=1)
+sum_B = torch.sum(B, dim=1)
+broadcast_A = sum_A.unsqueeze(1).repeat(1, batch_b)
+broadcast_B = sum_B.unsqueeze(1).repeat(1, batch_a)
+
+print("Done")
+"""
