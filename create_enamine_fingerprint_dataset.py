@@ -1,8 +1,9 @@
 import bz2
+import gc
 import gzip
 import time
 from asyncio import as_completed
-
+from multiprocessing.pool import ThreadPool
 import numpy as np
 import pandas as pd
 from rdkit import Chem
@@ -21,6 +22,20 @@ def seconds_to_human_readable(seconds):
     return f"{int(hours)}:{int(minutes):02}:{int(seconds):02}"
 
 
+def read_progress(progress_file):
+    """Read the progress file to get the last processed chunk index."""
+    if os.path.exists(progress_file):
+        with open(progress_file, "r") as file:
+            return int(file.read().strip())
+    return 0
+
+
+def write_progress(progress_file, chunks_processed):
+    """Write the number of processed chunks to the progress file."""
+    with open(progress_file, "w") as file:
+        file.write(str(chunks_processed))
+
+
 def smile_to_morgan_fingerprint(smile, radius=2, n_bits=2048):
     """Convert SMILES string to Morgan fingerprint."""
     mfpgen = rdFingerprintGenerator.GetMorganGenerator(radius=radius, fpSize=n_bits)
@@ -31,91 +46,94 @@ def smile_to_morgan_fingerprint(smile, radius=2, n_bits=2048):
     return np.array(fp)
 
 
-def process_chunk(chunk, thread_count):
-    """Process a chunk of SMILES strings using multithreading."""
+def process_chunk(chunk):
+    """Process a chunk of SMILES strings."""
     smiles = chunk['smiles']
-    fingerprints = []
-
-    # Multithreading for fingerprint computation
-    with ThreadPoolExecutor(max_workers=thread_count) as executor:
-        results = list(executor.map(smile_to_morgan_fingerprint, smiles))
-
-    for smile, fp in zip(smiles, results):
-        if fp is not None:
-            fingerprints.append({'smiles': smile, 'fingerprint': list(fp)})
-
-    return fingerprints
+    results = map(smile_to_morgan_fingerprint, smiles)
+    return pd.DataFrame({"smiles": smiles, "fingerprints": results})
 
 
-# Function to read the `.gz2` file in chunks
-def read_gz2_in_chunks(file_path, chunk_size):
+def process_file_in_chunks(file_path, chunk_size, output_dir, thread_pool_size, total_rows, resume=False):
     """
-    Generator to read a .gz2 file in chunks.
+    Processes a large file in chunks with resume functionality.
     """
-    with gzip.open(file_path, 'rt') as f:
-        reader = pd.read_csv(f, chunksize=chunk_size)
-        for chunk in reader:
-            yield chunk
+    os.makedirs(output_dir, exist_ok=True)
+    progress_file = os.path.join(output_dir, "progress.txt")
+    chunks_processed = read_progress(progress_file) if resume else 0
 
+    total_chunks = total_rows // chunk_size
+    if total_rows % chunk_size != 0:
+        total_chunks += 1  # Include the last chunk
 
-# Main function to orchestrate parallel processing
-def process_file_in_chunks(file_path, chunk_size, output_dir, thread_pool_size):
-    """
-    Process a large .gz2 file in chunks using a thread pool and save the results to disk as Parquet files.
-    """
-    chunk_index = 0
-    os.makedirs(output_dir, exist_ok=True)  # Ensure output directory exists
-    results = []
+    with bz2.open(file_path, "rt") as file:
+        chunk_iterator = pd.read_csv(file, chunksize=chunk_size, delimiter="\t")
+        # Skip already processed chunks
+        for _ in range(chunks_processed):
+            next(chunk_iterator)
 
-    with ThreadPoolExecutor(max_workers=thread_pool_size) as executor:
-        futures = {}
-        chunk_generator = read_gz2_in_chunks(file_path, chunk_size)
+        batch_index = chunks_processed // thread_pool_size
+        with tqdm(total=total_chunks, initial=chunks_processed, desc="Progress", unit="Chunk") as pbar:
+            while True:
+                pool = ThreadPool(thread_pool_size)
+                results = []
+                current_batch_size = 0
 
-        # Start reading chunks and assigning them to threads
-        for chunk in chunk_generator:
-            futures[executor.submit(process_chunk, chunk, chunk_index)] = chunk_index
-            chunk_index += 1
+                for _ in range(thread_pool_size):
+                    try:
+                        chunk = next(chunk_iterator)
+                        result = pool.apply_async(process_chunk, args=(chunk,))
+                        results.append(result)
+                        current_batch_size += 1
+                    except StopIteration:
+                        print("[INFO] Reached the end of the file.")
+                        break  # End of file
 
-            # Maintain a limited number of active threads
-            if len(futures) >= thread_pool_size:
-                for future in as_completed(futures):
-                    index = futures[future]
-                    result = future.result()
-                    results.append((index, result))
-                futures.clear()  # Reset for next batch of threads
+                if current_batch_size == 0:
+                    print("[INFO] No more chunks to process left in the file. Breaking.")
+                    break  # No more chunks to process
 
-        # Wait for remaining threads to complete
-        for future in as_completed(futures):
-            index = futures[future]
-            result = future.result()
-            results.append((index, result))
+                pool.close()
+                print(f"[INFO] Waiting for threads to complete...")
+                pool.join()
 
-    # Save processed chunks to Parquet incrementally
-    for index, result in sorted(results, key=lambda x: x[0]):  # Ensure order by index
-        output_file = os.path.join(output_dir, f"chunk_{index}.parquet")
-        result.to_parquet(output_file, index=False)
-        print(f"Saved chunk {index} to {output_file}")
+                # Combine and save results
+                combined_results = [result.get() for result in results if result is not None]
+                if combined_results:
+                    combined_df = pd.concat(combined_results, ignore_index=True)
+                    output_file = os.path.join(output_dir, f"output_batch_{batch_index + 1}.parquet")
+                    combined_df.to_parquet(output_file, engine="pyarrow", index=False, compression="snappy")
+                    del combined_results, combined_df
+                    gc.collect()
 
-    print(f"All chunks processed and saved to {output_dir}")
+                # Update progress
+                chunks_processed += current_batch_size
+                write_progress(progress_file, chunks_processed)
+                batch_index += 1
+                pbar.update(current_batch_size)
+
+    print(f"Processing completed. Total chunks processed: {chunks_processed}")
 
 
 if __name__ == "__main__":
     if len(sys.argv) < 3:
-        print("Usage: python create_enamine_fingerprint_dataset.py <input_file> <output_file> <[true/false]test_run>")
+        print("Usage: python create_enamine_fingerprint_dataset.py <input_file> <output_file> <chunk_size> <thread_pool_size>")
         sys.exit(1)
 
     input_file = sys.argv[1]
-    output_file = sys.argv[2]
+    output_dir = sys.argv[2]
     try:
-        test_run = sys.argv[3] == 'true'
-    except IndexError:
-        test_run = False
-    print(f"Running the python script with command \"python create_enamine_fingerprint_dataset.py {input_file} {output_file} {test_run}\"")
-    start_time = time.time()
-    # input_file = "/nethome/pjajoria/Documents/Enamine_REAL_HAC_24_394M_CXSMILES.cxsmiles.bz2"
-    # output_file = "/nethome/pjajoria/Documents/Enamine_REAL_HAC_24_394M_CXSMILES.cxsmiles.parquet"
+        chunk_size = int(sys.argv[3])
+    except (IndexError, ValueError):
+        chunk_size = 200_000
+    try:
+        thread_pool_size = int(sys.argv[4])
+    except (IndexError, ValueError):
+        thread_pool_size = 16
 
-    # Modify thread_count as per available resources
+    # input_file = "/nethome/pjajoria/Documents/Enamine_REAL_HAC_24_394M_CXSMILES.cxsmiles.bz2"
+    # output_dir = "/nethome/pjajoria/Documents/Enamine_REAL_HAC_24_394M_CXSMILES"
+    # chunk_size = 20_000
+    # thread_pool_size = 8
     file_row_map = {
         "Enamine_REAL_HAC_22_23_471M_CXSMILES.cxsmiles.bz2": 471_000_000,
         "Enamine_REAL_HAC_28_803M_CXSMILES.cxsmiles.bz2": 803_000_000,
@@ -128,5 +146,8 @@ if __name__ == "__main__":
         "Enamine_REAL_HAC_27_872M_CXSMILES.cxsmiles.bz2": 872_000_000
     }
     total_rows_from_filename = file_row_map[input_file.split("/")[-1]]
-    process_file(input_file, output_file, estimated_total_rows=total_rows_from_filename, chunk_size=100000, thread_count=8, test_run=test_run)
-    print(f"Finished processing {input_file} in {time.time() - start_time} seconds")
+
+    # Execute processing with resume functionality
+    start_time = time.time()
+    process_file_in_chunks(input_file, chunk_size, output_dir, thread_pool_size, total_rows_from_filename, resume=True)
+    print(f"Finished processing {input_file} in {seconds_to_human_readable(time.time() - start_time)}")

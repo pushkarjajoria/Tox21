@@ -37,7 +37,6 @@ def get_cv_splits(cv_df, num_folds, fold_col):
 def create_train_test_val_splits(file_path):
     # Load the CSV file
     data = pd.read_csv(file_path, index_col=0)
-    print(data[0:1].to_string())
 
     # Convert SMILES to Morgan fingerprints
     data["morgan_fp"] = list(map(smiles_to_morgan_fingerprint, data['smiles'].values))

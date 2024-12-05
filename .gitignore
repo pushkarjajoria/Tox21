@@ -199,6 +199,7 @@ benchmark_datasets/CACHE5/
 benchmark_datasets
 plots
 outputs
+models
 # PyInstaller
 #  Usually these files are written by a python script from a template
 #  before PyInstaller builds the exe, so as to inject date/other infos into it.
