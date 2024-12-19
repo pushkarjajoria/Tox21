@@ -101,6 +101,47 @@ def update_heap(key, comparison_datapoint, distance, heap_size=5):
         heapq.heapreplace(heap, (distance, comparison_datapoint))  # Replace the farthest element
 
 
+def main_iterative():
+    data_path = 'benchmark_datasets/CACHE5/20240430_MCHR1_splitted_RJ.csv'
+    enamine_dataset_dirs = ["/data/corpora/enamine/with_fingerprint/Enamine_REAL_HAC_29_38_1_3B_Part_1_CXSMILES",
+                            "/data/corpora/enamine/with_fingerprint/Enamine_REAL_HAC_29_38_1_3B_Part_2_CXSMILES"]
+
+    all_parquet_files = get_parquet_files_list(enamine_dataset_dirs)
+    all_parquet_files = all_parquet_files[:1]
+
+    data = pd.read_csv(data_path, index_col=0)
+
+    # Convert SMILES to Morgan fingerprints
+    data["morgan_fp"] = list(map(smiles_to_morgan_fingerprint, data['smiles'].values))
+
+    # Define the fold splits
+    train_folds = [f"Fold_{i}" for i in [0, 1, 2, 3, 5, 6, 7]]
+
+    # Create train, validation, and test sets based on the 'DataSAIL_10f' column
+    train_data = data[data["DataSAIL_10f"].isin(train_folds)]
+
+    # Create a dict with an empty list as the default factory
+    heap_dict = {}
+    start_time = time.time()
+
+    train_dataset = [x for x in zip(train_data["smiles"].values, list(map(get_bit_vector_from_fp, train_data["morgan_fp"].values)))]
+    # For each file
+    for df in yield_parquet_dataframes(all_parquet_files):
+        enamine_file = zip(df['smiles'].values, list(map(get_bit_vector_from_fp, df["fingerprints"].values)))
+        # For each datapoint in the file
+        for i, (enamine_smile, enamine_bv_fp) in enumerate(enamine_file):
+            # For each cache datapoint
+            for cache_smile, cache_bv_fp in train_dataset:
+                sim_score = DataStructs.TanimotoSimilarity(cache_bv_fp, enamine_bv_fp)
+                update_heap(cache_smile, enamine_smile, sim_score, heap_dict, heap_size=10)
+                if i >= 64:
+                    print(f"Completed batch 64 smiles in {time.time() - start_time} seconds")
+                    exit("Manual Stop")
+
+    heap_dict = {"files_list": all_parquet_files, "heap_dict": heap_dict}
+    save_pickle(heap_dict)
+
+
 if __name__ == "__main__":
     data_path = 'benchmark_datasets/CACHE5/20240430_MCHR1_splitted_RJ.csv'
     enamine_dataset_dirs = ["/data/corpora/enamine/with_fingerprint/Enamine_REAL_HAC_29_38_1_3B_Part_1_CXSMILES",

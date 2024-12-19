@@ -1,14 +1,11 @@
 import bz2
 import gc
-import gzip
 import time
-from asyncio import as_completed
 from multiprocessing.pool import ThreadPool
 import numpy as np
 import pandas as pd
 from rdkit import Chem
 from rdkit.Chem import rdFingerprintGenerator
-from concurrent.futures import ThreadPoolExecutor
 import os
 import sys
 from tqdm import tqdm
@@ -93,7 +90,7 @@ def process_file_in_chunks(file_path, chunk_size, output_dir, thread_pool_size, 
                     break  # No more chunks to process
 
                 pool.close()
-                print(f"[INFO] Waiting for threads to complete...")
+                print(f"[INFO] Waiting for threads to complete...", flush=True)
                 pool.join()
 
                 # Combine and save results
@@ -128,7 +125,7 @@ if __name__ == "__main__":
     try:
         thread_pool_size = int(sys.argv[4])
     except (IndexError, ValueError):
-        thread_pool_size = 16
+        thread_pool_size = 8
 
     # input_file = "/nethome/pjajoria/Documents/Enamine_REAL_HAC_24_394M_CXSMILES.cxsmiles.bz2"
     # output_dir = "/nethome/pjajoria/Documents/Enamine_REAL_HAC_24_394M_CXSMILES"
