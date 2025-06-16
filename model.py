@@ -1,3 +1,4 @@
+import pytorch_spiking
 import torch
 import torch.nn as nn
 import numpy as np
@@ -91,6 +92,24 @@ class MolPropPredictor(nn.Module):
         return x
 
 
+class HybridModelMultitask(nn.Module):
+    def __init__(self, baseline_model, noising_channel):
+        super(HybridModelMultitask, self).__init__()
+        self.noising_channel = noising_channel
+        self.noising_channel.eval()
+        self.baseline_model = baseline_model
+        self.baseline_model.eval()
+        self.activation = nn.Softmax(dim=2)
+
+    def forward(self, x):
+        self.eval()
+        with torch.no_grad():
+            out = self.baseline_model(x)
+            out = self.activation(out)
+            predictions = self.noising_channel(out)
+            return predictions
+
+
 class HybridModel(nn.Module):
     def __init__(self, baseline_model, noising_channel):
         super(HybridModel, self).__init__()
@@ -125,7 +144,7 @@ class NoiseLayer(nn.Module):
         return out
 
 
-class Channel(nn.Module):
+class Channel3D(nn.Module):
     """
     A PyTorch implementation of the Keras Channel layer suggested by the authors.
 
@@ -142,7 +161,56 @@ class Channel(nn.Module):
     """
 
     def __init__(self, input_dim, output_dim=None, activation=F.softmax, theta=None):
-        super(Channel, self).__init__()
+        super(Channel3D, self).__init__()
+        self.input_dim = input_dim
+        self.output_dim = output_dim if output_dim is not None else input_dim
+        self.activation = activation
+
+        # Initialize the channel matrix with custom weights (theta) if provided
+        if theta is not None:
+            self.channel_matrix = nn.Parameter(theta, requires_grad=True)
+        else:
+            self.channel_matrix = nn.Parameter(torch.randn(self.input_dim, self.output_dim), requires_grad=True)
+
+    def forward(self, x):
+        """
+        Forward pass through the layer. Computes the dot product between the input
+        and the channel matrix, applying the softmax to convert the channel matrix
+        to a probability matrix.
+
+        Arguments:
+        - x: The output of the baseline classifier with shape (batch_size, input_dim).
+        """
+        # Convert channel_matrix to a stochastic matrix
+        channel_matrix = self.activation(self.channel_matrix, dim=2)
+
+        # Perform dot product: batch_size x output_dim with output_dim x output_dim
+        # output -> (batch_size, output_dim)
+
+        # For multitask case
+        # Dot (batch_size, tasks, output_dim) with (tasks, output_dim, output_dim)
+        # Dot (32, 12, 2) with (12, 2, 2)
+        return torch.einsum('btd,tdf->btf', x, channel_matrix)
+
+
+class Channel2D(nn.Module):
+    """
+    A PyTorch implementation of the Keras Channel layer suggested by the authors.
+
+    Based on the paper:
+    Goldberger & Ben-Reuven, Training deep neural-networks using a noise
+    adaptation layer, ICLR 2017.
+    https://openreview.net/forum?id=H12GRgcxg
+
+    Arguments:
+    - input_dim: int, the number of input dimensions (features).
+    - output_dim: int, optional (default is the same as input_dim).
+    - activation: activation function, default is softmax.
+    - theta: optional, custom weights to initialize the channel matrix.
+    """
+
+    def __init__(self, input_dim, output_dim=None, activation=F.softmax, theta=None):
+        super(Channel2D, self).__init__()
         self.input_dim = input_dim
         self.output_dim = output_dim if output_dim is not None else input_dim
         self.activation = activation
@@ -185,6 +253,187 @@ class MNISTClassifier(nn.Module):
         x = self.dropout2(x)
         x = self.output(x)
         return x
+
+
+class Tox21Predictor(nn.Module):
+    def __init__(self, input_size: int=2048, output_size: int=24, seed: int=42, hidden_layers=None,
+                 activation=torch.relu, drop_p: float = 0.5, res_layers: bool = True):
+        super(Tox21Predictor, self).__init__()
+
+        # configuration features:
+        if hidden_layers is None:
+            hidden_layers = [1024, 512, 256]
+        self.res_layers = res_layers  # If true - will have residual layers
+        self.seed = torch.manual_seed(seed)
+        self.dropout = nn.Dropout(p=drop_p)
+        self.activation = activation  # Activation
+
+        # Implementing hidden layers:
+        self.hidden_layers = nn.ModuleList(
+            [nn.Linear(input_size, hidden_layers[0])])  # first layer, from input to first hidden layer
+        layer_sizes = zip(hidden_layers[:-1], hidden_layers[1:])
+        self.hidden_layers.extend([nn.Linear(h1, h2) for h1, h2 in layer_sizes])  # hidden layers implemented here
+        self.constant_layers = nn.ModuleList(
+            [nn.Linear(h, h) for h in hidden_layers])  # constant layers are implemented here (for residual layers)
+        self.output = nn.Linear(hidden_layers[-1], output_size)  # the output layer
+
+        # batch normalisation layers implemented here:
+        self.bat = nn.ModuleList([nn.BatchNorm1d(hidden_layers[i]) for i in range(0, len(hidden_layers))])
+
+    def forward(self, input):
+        # step 1. For each hidden layer:
+        batch_size = input.shape[0]
+        for i, linear in enumerate(self.hidden_layers):
+            # step 2. Apply activation after layer
+            input = self.activation(linear(input))
+
+            # step 3. If residual layers are enabled: add another constant layer from the previous layer output, with an activation
+            if self.res_layers:
+                input = self.activation(self.constant_layers[i](input)) + input
+
+            # step 4. Batch normalise
+            input = self.bat[i](input)
+
+            # step 5. Dropout
+            input = self.dropout(input)
+
+        # step 6. output layer and sigmoid
+        output = self.output(input)
+        output = output.reshape(batch_size, 12, 2)
+        return output
+
+
+class IFMEncoder(nn.Module):
+    def __init__(self, n_num_features: int, d_out: int, sigma: float, flatten=True) -> None:
+        """
+        :param n_num_features: Number of features in the input. (ex 2048 for morgan fingerprint)
+        :param d_out: This is the same as 'k' in the paper. New embedded output dim is now 2*d_out*n_num_features
+        :param sigma:
+        """
+        super().__init__()
+        self.flatten = flatten
+        self.d_out = d_out
+        self.sigma = sigma
+        self.n_num_features = n_num_features
+        self.coeffs = 2 * np.pi * sigma ** (torch.arange(d_out) / d_out)
+        self.out_dim = n_num_features * 2 * d_out
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        x: (n_batch, n_features)
+        returns: (n_batch, n_features * 2 * d_out)
+        """
+        xp = self.coeffs.to(x.device) * torch.unsqueeze(x, -1)
+        xp_cat = torch.cat((torch.cos(xp), torch.sin(xp)), dim=-1)
+        if self.flatten:
+            return xp_cat.flatten(-2, -1)
+        else:
+            return xp_cat.permute((0,2,1))
+
+
+class Cache5AntagonistPredictor(nn.Module):
+    def __init__(self, input_size: int=2048, output_size: int=2, seed: int=42, hidden_layers=None,
+                 activation=torch.relu, drop_p: float = 0.5, res_layers: bool = True, embedding=False, embedder=None):
+        super(Cache5AntagonistPredictor, self).__init__()
+        self.embedding = embedding
+        self.embedder = None
+        if self.embedding:
+            self.embedder = embedder if embedder is not None else IFMEncoder(n_num_features=input_size, d_out=8, sigma=6)
+            input_size = self.embedder.out_dim
+        # configuration features:
+        if hidden_layers is None:
+            hidden_layers = [1024, 512, 256]
+        self.res_layers = res_layers  # If true - will have residual layers
+        self.seed = torch.manual_seed(seed)
+        self.dropout = nn.Dropout(p=drop_p)
+        self.activation = torch.relu if activation is None else activation  # Activation
+
+        # Implementing hidden layers:
+        self.hidden_layers = nn.ModuleList(
+            [nn.Linear(input_size, hidden_layers[0])])  # first layer, from input to first hidden layer
+        layer_sizes = zip(hidden_layers[:-1], hidden_layers[1:])
+        self.hidden_layers.extend([nn.Linear(h1, h2) for h1, h2 in layer_sizes])  # hidden layers implemented here
+        self.constant_layers = nn.ModuleList(
+            [nn.Linear(h, h) for h in hidden_layers])  # constant layers are implemented here (for residual layers)
+        self.output = nn.Linear(hidden_layers[-1], output_size)  # the output layer
+
+        # batch normalisation layers implemented here:
+        self.bat = nn.ModuleList([nn.BatchNorm1d(hidden_layers[i]) for i in range(0, len(hidden_layers))])
+
+    def forward(self, input):
+        if self.embedding:
+            input = self.embedder(input)
+        # step 1. For each hidden layer:
+        for i, linear in enumerate(self.hidden_layers):
+            # step 2. Apply activation after layer
+            input = self.activation(linear(input))
+
+            # step 3. If residual layers are enabled: add another constant layer from the previous layer output, with an activation
+            if self.res_layers:
+                input = self.activation(self.constant_layers[i](input)) + input
+
+            # step 4. Batch normalise
+            input = self.bat[i](input)
+
+            # step 5. Dropout
+            input = self.dropout(input)
+
+        # step 6. output layer and sigmoid
+        output = self.output(input)
+        return output
+
+
+class SpikingCache5AntagonistPredictor(nn.Module):
+    def __init__(self, input_size: int=2048, output_size: int=2, seed: int=42, hidden_layers=None,
+                 activation=torch.relu, drop_p: float = 0.5, res_layers: bool = True, embedding=False, embedder=None):
+        super(SpikingCache5AntagonistPredictor, self).__init__()
+        self.embedding = embedding
+        self.embedder = None
+        if self.embedding:
+            self.embedder = embedder if embedder is not None else IFMEncoder(n_num_features=input_size, d_out=8, sigma=6, flatten=False)
+            input_size = self.embedder.out_dim
+        # configuration features:
+        if hidden_layers is None:
+            hidden_layers = [1024, 512, 256]
+        self.res_layers = res_layers  # If true - will have residual layers
+        self.seed = torch.manual_seed(seed)
+        self.dropout = nn.Dropout(p=drop_p)
+        self.activation = pytorch_spiking.SpikingActivation(torch.nn.ReLU())
+
+        # Implementing hidden layers:
+        self.hidden_layers = nn.ModuleList(
+            [nn.Linear(input_size, hidden_layers[0])])  # first layer, from input to first hidden layer
+        layer_sizes = zip(hidden_layers[:-1], hidden_layers[1:])
+        self.hidden_layers.extend([nn.Linear(h1, h2) for h1, h2 in layer_sizes])  # hidden layers implemented here
+        self.constant_layers = nn.ModuleList(
+            [nn.Linear(h, h) for h in hidden_layers])  # constant layers are implemented here (for residual layers)
+        self.output = nn.Linear(hidden_layers[-1], output_size)  # the output layer
+
+        # batch normalisation layers implemented here:
+        self.bat = nn.ModuleList([nn.BatchNorm1d(hidden_layers[i]) for i in range(0, len(hidden_layers))])
+
+    def forward(self, input):
+        input = torch.tile(input[:, None], (1, 10, 1))
+        if self.embedding:
+            input = self.embedder(input)
+        # step 1. For each hidden layer:
+        for i, linear in enumerate(self.hidden_layers):
+            # step 2. Apply activation after layer
+            input = self.activation(linear(input))
+
+            # step 3. If residual layers are enabled: add another constant layer from the previous layer output, with an activation
+            if self.res_layers:
+                input = self.activation(self.constant_layers[i](input)) + input
+
+            # step 4. Batch normalise
+            input = self.bat[i](input)
+
+            # step 5. Dropout
+            input = self.dropout(input)
+
+        # step 6. output layer and sigmoid
+        output = self.output(input)
+        return output
 
 
 if __name__ == "__main__":

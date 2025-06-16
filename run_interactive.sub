@@ -1,18 +1,11 @@
-# HTCondor submit description file
-# Everything with a leading # is a comment
-
 universe                = docker
 docker_image            = pushkarjajoria/noisy_labels:rdkit
 initialdir              = /nethome/pjajoria
-executable              = /nethome/pjajoria/Github/Tox21Noisy/run_enamine_fp.sh
-environment             = "DOCKER_PULL=always"
 output                  = /nethome/pjajoria/Github/Tox21Noisy/logfiles/run.sh.$(ClusterId).$(Year)_$(Month)_$(Day)_$(SUBMIT_TIME).out
 error                   = /nethome/pjajoria/Github/Tox21Noisy/logfiles/run.sh.$(ClusterId).$(Year)_$(Month)_$(Day)_$(SUBMIT_TIME).err
 log                     = /nethome/pjajoria/Github/Tox21Noisy/logfiles/run.sh.$(ClusterId).$(Year)_$(Month)_$(Day)_$(SUBMIT_TIME).log
 request_CPUs            = 8
 request_memory          = 512G
-
-# Files for cl14lx (Set 2)
-requirements            = (Machine == "cl14lx.lsv.uni-saarland.de")
-arguments               = /data/corpora/enamine/Enamine_REAL_HAC_29_38_1.3B_Part_2_CXSMILES.cxsmiles.bz2 /data/corpora/enamine/with_fingerprint/Enamine_REAL_HAC_29_38_1_3B_Part_2_CXSMILES 20000 8
+request_GPUs            = 0
+requirements            = (machine == "cl14lx.lsv.uni-saarland.de")
 queue 1

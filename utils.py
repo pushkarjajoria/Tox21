@@ -1,7 +1,6 @@
 import random
-
 from numpy.testing import assert_array_almost_equal
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score
 from torch.utils.data import Dataset, random_split
 import numpy as np
 import torch
@@ -9,20 +8,27 @@ from torch.utils.data import DataLoader
 from tabulate import tabulate
 from torchvision.datasets import MNIST
 from tqdm import tqdm
+from skmultilearn.model_selection import iterative_train_test_split
+from data_prep import FingerprintDataset
+import torch
 
 
 class EarlyStopping:
-    def __init__(self, patience=5, verbose=False, delta=0):
+    def __init__(self, patience=5, verbose=False, delta=0, path='checkpoint.pt'):
         self.patience = patience
         self.verbose = verbose
         self.counter = 0
         self.best_loss = None
         self.early_stop = False
         self.delta = delta
+        self.path = path  # Path to save the best model
+        self.best_model = None  # To store the best model's state dict
 
     def __call__(self, val_loss, model):
+        # Check if it's the first time or if there's an improvement
         if self.best_loss is None:
             self.best_loss = val_loss
+            self.save_checkpoint(model)
         elif val_loss > self.best_loss + self.delta:
             self.counter += 1
             if self.verbose:
@@ -32,6 +38,17 @@ class EarlyStopping:
         else:
             self.best_loss = val_loss
             self.counter = 0
+            self.save_checkpoint(model)
+
+    def save_checkpoint(self, model):
+        """Saves the model when validation loss decreases."""
+        if self.verbose:
+            print(f"Validation loss decreased. Saving model...")
+        self.best_model = model.state_dict().copy()  # Store the best model state dict
+
+    def load_best_model(self, model):
+        """Load the best model (after early stopping)."""
+        model.load_state_dict(self.best_model)
 
 
 class NoisedDataset(Dataset):
@@ -43,31 +60,40 @@ class NoisedDataset(Dataset):
         """
         self.dataset = original_dataset
         self.noise_level = noise_level
-        self.noised_labels = self._create_noised_labels()
+        self.original_labels = self.dataset.labels
         self.x = self.dataset.x
+        self.masks = self.dataset.masks
+        self.output_size = self.original_labels.shape[1]
+        self.labels = self._create_noised_labels()
 
     def _create_noised_labels(self):
         """
         Applies noise to the labels while preserving class distribution.
+        The labels for MultiTask learning are now (12,) indicating the 12 tasks in Tox21.
+        Each of the subtasks is noised separately as per the noise level.
+
+        10% noise denotes that if there are 100 samples out of which 10 are active or 1 and 90 are inactive or 0,
+        1 sample from the 0 will be changed to a 1 and one sample from the 1 will be changed to a 0.
+        I.e. 10% noise means 10% of the active samples will be noised and NOT 10% of the dataset.
+        This is done in light of the class imbalance in molecular property prediction datasets.
         """
-        original_labels = [self.dataset[i]['label'] for i in range(len(self.dataset))]
+        noised_labels = self.original_labels.copy()
+        for i in range(self.output_size):
+            class_i_label = noised_labels[:, i]
+            class_0_indices = [i for i, label in enumerate(class_i_label) if label == 0.]
+            class_1_indices = [i for i, label in enumerate(class_i_label) if label == 1.]
 
-        class_0_indices = [i for i, label in enumerate(original_labels) if label == 0.]
-        class_1_indices = [i for i, label in enumerate(original_labels) if label == 1.]
+            num_of_samples_to_noise = int(len(class_1_indices) * self.noise_level)
 
-        noised_labels = original_labels.copy()
+            # Apply noise to a percentage of the 0s
+            noise_class_0_indices = random.sample(class_0_indices, num_of_samples_to_noise)
+            for j in noise_class_0_indices:
+                noised_labels[j, i] = 1  # Flip 0 to 1
 
-        num_of_samples_to_noise = int(len(class_1_indices) * self.noise_level)
-
-        # Apply noise to a percentage of the 0s
-        noise_class_0_indices = random.sample(class_0_indices, num_of_samples_to_noise)
-        for i in noise_class_0_indices:
-            noised_labels[i] = 1  # Flip 0 to 1
-
-        # Apply noise to a percentage of the 1s
-        noise_class_1_indices = random.sample(class_1_indices, num_of_samples_to_noise)
-        for i in noise_class_1_indices:
-            noised_labels[i] = 0  # Flip 1 to 0
+            # Apply noise to a percentage of the 1s
+            noise_class_1_indices = random.sample(class_1_indices, num_of_samples_to_noise)
+            for j in noise_class_1_indices:
+                noised_labels[j, i] = 0  # Flip 1 to 0
 
         return noised_labels
 
@@ -75,7 +101,9 @@ class NoisedDataset(Dataset):
         return len(self.dataset)
 
     def __getitem__(self, idx):
-        return {'x': self.dataset[idx]['x'], 'label': torch.tensor(self.noised_labels[idx], dtype=torch.float)}
+        return {'x': torch.tensor(self.x[idx], dtype=torch.float),
+                'label': torch.tensor(self.labels[idx], dtype=torch.float),
+                'mask': torch.tensor(self.masks[idx], dtype=torch.float)}
 
 
 class NoisedMNISTDataset(Dataset):
@@ -133,7 +161,78 @@ class NoisedMNISTDataset(Dataset):
         return (self.dataset[idx][0], torch.tensor(self.noised_labels[idx], dtype=torch.int))
 
 
-def test(test_loader, model, fingerprint=True):
+def test(test_loader, model, fingerprint=True, verbose=False):
+    all_preds = []
+    all_labels = []
+    all_masks = []
+
+    model.eval()
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    with torch.no_grad():
+        for batch in test_loader:
+            if fingerprint:
+                x = batch['x'].float().to(device)  # Fingerprint Input
+            else:
+                x = batch['x']  # Smile input
+            labels = batch['label'].nan_to_num().long().to(device)  # Labels should be of type long for CrossEntropyLoss
+            mask = batch['mask'].long()
+            output = model(x)
+            preds = torch.argmax(output, dim=2).cpu().numpy()  # Apply threshold for binary classification
+            all_preds.extend(preds)
+            all_labels.extend(labels.cpu().numpy())
+            all_masks.extend(mask.cpu().numpy())
+
+    all_preds = np.array(all_preds)
+    all_labels = np.array(all_labels)
+    all_masks = np.array(all_masks)
+    all_tasks = ['SR-HSE', 'NR-AR', 'SR-ARE', 'NR-Aromatase', 'NR-ER-LBD', 'NR-AhR', 'SR-MMP', 'NR-ER', 'NR-PPAR-gamma',
+                 'SR-p53', 'SR-ATAD5', 'NR-AR-LBD']
+    accuracy_task_map = {}
+    precision_task_map = {}
+    recall_task_map = {}
+    f1_task_map = {}
+    roc_auc_task_map = {}
+    for i, task in enumerate(all_tasks):
+        task_pred = all_preds[:, i]
+        task_label = all_labels[:, i]
+        task_mask = all_masks[:, i]
+        task_pred_filtered = task_pred[task_mask == 1]
+        task_label_filtered = task_label[task_mask == 1]
+
+        accuracy = accuracy_score(task_label_filtered, task_pred_filtered)
+        precision = precision_score(task_label_filtered, task_pred_filtered)
+        recall = recall_score(task_label_filtered, task_pred_filtered)
+        f1 = f1_score(task_label_filtered, task_pred_filtered)
+        roc_auc = roc_auc_score(task_label_filtered, task_pred_filtered)
+
+        # Storing the metrics in the task-specific maps
+        accuracy_task_map[task] = accuracy
+        precision_task_map[task] = precision
+        recall_task_map[task] = recall
+        f1_task_map[task] = f1
+        roc_auc_task_map[task] = roc_auc
+
+    if verbose:
+        # Prepare the data for tabulation
+        table_data = []
+        for task in all_tasks:
+            table_data.append([
+                task,
+                accuracy_task_map[task],
+                precision_task_map[task],
+                recall_task_map[task],
+                f1_task_map[task],
+                roc_auc_task_map[task]
+            ])
+
+        # Print the table
+        headers = ['Task', 'Accuracy', 'Precision', 'Recall', 'F1-Score', 'Roc-Auc']
+        print(tabulate(table_data, headers, floatfmt=".4f"))
+
+    return accuracy_task_map, precision_task_map, recall_task_map, f1_task_map, roc_auc_task_map
+
+
+def test_cache5(test_loader, model, fingerprint=True):
     all_preds = []
     all_labels = []
 
@@ -142,28 +241,40 @@ def test(test_loader, model, fingerprint=True):
     with torch.no_grad():
         for batch in test_loader:
             if fingerprint:
-                x = batch['x'].float().to(device)
+                x = batch['x'].float().to(device)  # Fingerprint Input
             else:
-                x = batch['x']
-            labels = batch['label'].long().to(device)
+                x = batch['x']  # Smile input
+            labels = batch['label'].long().to(device)  # Labels should be of type long for CrossEntropyLoss
             output = model(x)
             preds = torch.argmax(output, dim=1).cpu().numpy()  # Apply threshold for binary classification
             all_preds.extend(preds)
             all_labels.extend(labels.cpu().numpy())
 
-    all_preds = np.array(all_preds).flatten()
-    all_labels = np.array(all_labels).flatten()
-
+    all_preds = np.array(all_preds)
+    all_labels = np.array(all_labels)
     accuracy = accuracy_score(all_labels, all_preds)
     precision = precision_score(all_labels, all_preds)
     recall = recall_score(all_labels, all_preds)
     f1 = f1_score(all_labels, all_preds)
+    roc_auc = roc_auc_score(all_labels, all_preds)
 
-    print(f'Accuracy: {accuracy:.4f}')
-    print(f'Precision: {precision:.4f}')
-    print(f'Recall: {recall:.4f}')
-    print(f'F1 Score: {f1:.4f}')
-    return accuracy, precision, recall, f1
+    # Storing the metrics in the task-specific maps
+        # Prepare the data for tabulation
+    table_data = []
+    table_data.append([
+            "Cache5 Antagonist Prediction",
+            accuracy,
+            precision,
+            recall,
+            f1,
+            roc_auc
+        ])
+
+    # Print the table
+    headers = ['Task', 'Accuracy', 'Precision', 'Recall', 'F1-Score', 'Roc-Auc']
+    print(tabulate(table_data, headers, floatfmt=".4f"))
+
+    return accuracy, precision, recall, f1, roc_auc
 
 
 def test_mnist(test_loader, model):
@@ -212,23 +323,30 @@ def hybrid_train(train_loader, model, noisemodel, optimizer, noise_optimizer, cr
     for batch in train_loader:
         optimizer.zero_grad()
         noise_optimizer.zero_grad()
-
         if fingerprint:
-            x = batch['x'].float().to(device)
+            x = batch['x'].float().to(device)  # Fingerprint Input
         else:
-            x = batch['x']
-        labels = batch['label'].long().to(device)
-        # set all gradient to zero
+            x = batch['x']  # Smile input
+        labels = batch['label'].nan_to_num().long().to(device)  # Labels should be of type long for CrossEntropyLoss
+        batch_len = x.shape[0]
+        num_tasks = labels.shape[1]
+        mask = batch['mask'].long().to(device)
+
         optimizer.zero_grad()
         noise_optimizer.zero_grad()
         # forward propagation
         out = model(x)
-        out_softmax = torch.nn.functional.softmax(out, dim=1)
+        out_softmax = torch.nn.functional.softmax(out, dim=2)
         predictions = noisemodel(out_softmax)
         # calculate loss and acc
-        baseline_loss = criterion(out, labels)
-        noise_model_loss = criterion(predictions, labels)
-        loss = BETA * baseline_loss + (1-BETA) * noise_model_loss
+        baseline_loss = criterion(out.reshape((batch_len * num_tasks, -1)), labels.reshape((batch_len * num_tasks)))
+        noise_model_loss = criterion(predictions.reshape((batch_len * num_tasks, -1)), labels.reshape((batch_len * num_tasks)))
+        masked_loss_baseline = baseline_loss * mask.reshape(-1)
+        final_loss_baseline = masked_loss_baseline.sum() / mask.sum()
+        masked_loss_noise = noise_model_loss * mask.reshape(-1)
+        final_loss_noise = masked_loss_noise.sum() / mask.sum()
+
+        loss = BETA * final_loss_baseline + (1-BETA) * final_loss_noise
 
         # back propagation
         loss.backward()
@@ -237,7 +355,7 @@ def hybrid_train(train_loader, model, noisemodel, optimizer, noise_optimizer, cr
         noise_optimizer.step()
 
 
-def hybrid_train_mnist(train_loader, model, noisemodel, optimizer, noise_optimizer, criterion, BETA=0):
+def hybrid_train_mnist(train_loader, model, noisemodel, optimizer, noise_optimizer, criterion, BETA=0, fingerprint=True):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model.train()
     noisemodel.train()
@@ -245,8 +363,13 @@ def hybrid_train_mnist(train_loader, model, noisemodel, optimizer, noise_optimiz
     total_loss = 0  # Accumulator for total loss
 
     for batch in train_loader:
-        x = batch[0].float().to(device)
-        labels = batch[1].long().to(device)
+        optimizer.zero_grad()
+        noise_optimizer.zero_grad()
+        if fingerprint:
+            x = batch['x'].float().to(device)  # Fingerprint Input
+        else:
+            x = batch['x']  # Smile input
+        labels = batch['label'].long().to(device)  # Labels should be of type long for CrossEntropyLoss
 
         # Set all gradients to zero
         optimizer.zero_grad()
@@ -284,7 +407,7 @@ def calculate_positive_percentage(dataset):
         labels = batch['label'].numpy()
         all_labels.extend(labels)
     all_labels = np.array(all_labels)
-    positive_percentage = np.mean(all_labels == 1) * 100
+    positive_percentage = np.mean(all_labels == 1, axis=0) * 100
     return positive_percentage
 
 
@@ -435,15 +558,35 @@ def validation_loss_tox21(model, valid_data_loader, criterion, device, fingerpri
     with torch.no_grad():
         for batch in valid_data_loader:
             if fingerprint:
-                x = batch['x'].float().to(device)
+                x = batch['x'].float().to(device)  # Fingerprint Input
             else:
-                x = batch['x']
-            labels = batch['label'].long().to(device)  # Labels should be of type long for CrossEntropyLoss
-
-            # Forward pass
+                x = batch['x']  # Smile input
+            labels = batch['label'].nan_to_num().long().to(device)  # Labels should be of type long for CrossEntropyLoss
+            batch_len = x.shape[0]
+            num_tasks = labels.shape[1]
+            mask = batch['mask'].long().to(device)
             output = model(x)
+            loss = criterion(output.reshape((batch_len * num_tasks, -1)), labels.reshape((batch_len * num_tasks)))
+            masked_loss = loss * mask.reshape(-1)
+            final_loss = masked_loss.sum() / mask.sum()
+            val_loss += final_loss.item()
 
-            # Calculate loss
+    avg_val_loss = val_loss / len(valid_data_loader)  # Return average validation loss
+    return avg_val_loss
+
+
+def validation_loss_cache5(model, valid_data_loader, criterion, device, fingerprint=True):
+    model.eval()  # Set model to evaluation mode
+    val_loss = 0.0
+
+    with torch.no_grad():
+        for batch in valid_data_loader:
+            if fingerprint:
+                x = batch['x'].float().to(device)  # Fingerprint Input
+            else:
+                x = batch['x']  # Smile input
+            labels = batch['label'].long().to(device)  # Labels should be of type long for CrossEntropyLoss
+            output = model(x)
             loss = criterion(output, labels)
             val_loss += loss.item()
 
@@ -538,3 +681,45 @@ def split_smile_dataset_train_validation(dataset, train_split_ratio=0.8, batch_s
     val_data_loader = DataLoader(dataset=val_split, batch_size=validation_batch_size, shuffle=False)
 
     return train_data_loader, val_data_loader
+
+
+def iterative_validation_split(dataset, test_size=0.1, batch_size=32, validation_batch_size=1000, pca_transformation=True,
+                               n_pca_components=512):
+    # Separate positive and negative examples
+    X = dataset.x  # Features
+    y = dataset.labels  # Labels
+    masks = dataset.masks  # Masks
+
+    # Concatenate X and masks to ensure they are split together with y
+    X_combined = np.concatenate([X, masks], axis=1)
+
+    # Perform iterative train-test split
+    X_train_combined, y_train, X_test_combined, y_test = iterative_train_test_split(X_combined, y, test_size=test_size)
+
+    # After the split, separate X and masks from the combined data
+    num_features = X.shape[1]  # Number of features in X
+    X_train = X_train_combined[:, :num_features]
+    masks_train = X_train_combined[:, num_features:]
+
+    X_test = X_test_combined[:, :num_features]
+    masks_test = X_test_combined[:, num_features:]    # Create the dataset back from X and y
+
+    # Create training dataset
+    train_split = FingerprintDataset(fingerprints=X_train, masks=masks_train, labels=y_train)
+    pca = None
+    if pca_transformation:
+        pca = train_split.fit_transform_pca(n_components=n_pca_components)
+    # Create val dataset
+    val_split = FingerprintDataset(fingerprints=X_test, masks=masks_test, labels=y_test)
+    if pca_transformation:
+        _ = val_split.fit_transform_pca(pca=pca)
+    # Create data loaders
+    train_data_loader = DataLoader(dataset=train_split, batch_size=batch_size, shuffle=True)
+    val_data_loader = DataLoader(dataset=val_split, batch_size=validation_batch_size, shuffle=False)
+
+    return train_data_loader, val_data_loader, pca
+
+
+if __name__ == "__main__":
+    ds = FingerprintDataset(file_path="/nethome/pjajoria/Github/Tox21Noisy/benchmark_datasets/tox21/tox21_10k_challenge_test_duplicates_merged.csv")
+    iterative_validation_split(ds)

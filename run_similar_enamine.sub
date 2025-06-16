@@ -1,0 +1,32 @@
+# HTCondor submit description file
+
+universe                = docker
+docker_image            = pushkarjajoria/noisy_labels:rdkit_updated
+initialdir              = /nethome/pjajoria
+executable              = /nethome/pjajoria/Github/Tox21Noisy/run_hpc.sh
+output                  = /nethome/pjajoria/Github/Tox21Noisy/logfiles/run.sh.$(ClusterId).$(Year)_$(Month)_$(Day)_$(SUBMIT_TIME).out
+error                   = /nethome/pjajoria/Github/Tox21Noisy/logfiles/run.sh.$(ClusterId).$(Year)_$(Month)_$(Day)_$(SUBMIT_TIME).err
+log                     = /nethome/pjajoria/Github/Tox21Noisy/logfiles/run.sh.$(ClusterId).$(Year)_$(Month)_$(Day)_$(SUBMIT_TIME).log
+request_CPUs            = 1
+request_memory          = 20G
+request_GPUs            = 1
+
+# Files for cl18lx (Set 1)
+requirements            = (Machine == "cl17lx.lsv.uni-saarland.de")
+arguments               = 1 weighted_tanimoto
+queue 1
+
+# Files for cl18lx (Set 2)
+requirements            = (Machine == "cl17lx.lsv.uni-saarland.de")
+arguments               = 2 weighted_tanimoto
+queue 1
+
+# Files for cl18lx (Set 3)
+requirements            = (Machine == "cl17lx.lsv.uni-saarland.de")
+arguments               = 3 weighted_tanimoto
+queue 1
+
+# Files for cl18lx (Set 4)
+requirements            = (Machine == "cl17lx.lsv.uni-saarland.de")
+arguments               = 4 weighted_tanimoto
+queue 1
