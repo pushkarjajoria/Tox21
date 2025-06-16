@@ -1,3 +1,4 @@
+import pytorch_spiking
 import torch
 import torch.nn as nn
 import numpy as np
@@ -302,18 +303,50 @@ class Tox21Predictor(nn.Module):
         return output
 
 
-class Cache5AntagonistPredictor(nn.Module):
-    def __init__(self, input_size: int=2048, output_size: int=24, seed: int=42, hidden_layers=None,
-                 activation=torch.relu, drop_p: float = 0.5, res_layers: bool = True):
-        super(Cache5AntagonistPredictor, self).__init__()
+class IFMEncoder(nn.Module):
+    def __init__(self, n_num_features: int, d_out: int, sigma: float, flatten=True) -> None:
+        """
+        :param n_num_features: Number of features in the input. (ex 2048 for morgan fingerprint)
+        :param d_out: This is the same as 'k' in the paper. New embedded output dim is now 2*d_out*n_num_features
+        :param sigma:
+        """
+        super().__init__()
+        self.flatten = flatten
+        self.d_out = d_out
+        self.sigma = sigma
+        self.n_num_features = n_num_features
+        self.coeffs = 2 * np.pi * sigma ** (torch.arange(d_out) / d_out)
+        self.out_dim = n_num_features * 2 * d_out
 
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        x: (n_batch, n_features)
+        returns: (n_batch, n_features * 2 * d_out)
+        """
+        xp = self.coeffs.to(x.device) * torch.unsqueeze(x, -1)
+        xp_cat = torch.cat((torch.cos(xp), torch.sin(xp)), dim=-1)
+        if self.flatten:
+            return xp_cat.flatten(-2, -1)
+        else:
+            return xp_cat.permute((0,2,1))
+
+
+class Cache5AntagonistPredictor(nn.Module):
+    def __init__(self, input_size: int=2048, output_size: int=2, seed: int=42, hidden_layers=None,
+                 activation=torch.relu, drop_p: float = 0.5, res_layers: bool = True, embedding=False, embedder=None):
+        super(Cache5AntagonistPredictor, self).__init__()
+        self.embedding = embedding
+        self.embedder = None
+        if self.embedding:
+            self.embedder = embedder if embedder is not None else IFMEncoder(n_num_features=input_size, d_out=8, sigma=6)
+            input_size = self.embedder.out_dim
         # configuration features:
         if hidden_layers is None:
             hidden_layers = [1024, 512, 256]
         self.res_layers = res_layers  # If true - will have residual layers
         self.seed = torch.manual_seed(seed)
         self.dropout = nn.Dropout(p=drop_p)
-        self.activation = activation  # Activation
+        self.activation = torch.relu if activation is None else activation  # Activation
 
         # Implementing hidden layers:
         self.hidden_layers = nn.ModuleList(
@@ -328,6 +361,8 @@ class Cache5AntagonistPredictor(nn.Module):
         self.bat = nn.ModuleList([nn.BatchNorm1d(hidden_layers[i]) for i in range(0, len(hidden_layers))])
 
     def forward(self, input):
+        if self.embedding:
+            input = self.embedder(input)
         # step 1. For each hidden layer:
         for i, linear in enumerate(self.hidden_layers):
             # step 2. Apply activation after layer
@@ -347,6 +382,58 @@ class Cache5AntagonistPredictor(nn.Module):
         output = self.output(input)
         return output
 
+
+class SpikingCache5AntagonistPredictor(nn.Module):
+    def __init__(self, input_size: int=2048, output_size: int=2, seed: int=42, hidden_layers=None,
+                 activation=torch.relu, drop_p: float = 0.5, res_layers: bool = True, embedding=False, embedder=None):
+        super(SpikingCache5AntagonistPredictor, self).__init__()
+        self.embedding = embedding
+        self.embedder = None
+        if self.embedding:
+            self.embedder = embedder if embedder is not None else IFMEncoder(n_num_features=input_size, d_out=8, sigma=6, flatten=False)
+            input_size = self.embedder.out_dim
+        # configuration features:
+        if hidden_layers is None:
+            hidden_layers = [1024, 512, 256]
+        self.res_layers = res_layers  # If true - will have residual layers
+        self.seed = torch.manual_seed(seed)
+        self.dropout = nn.Dropout(p=drop_p)
+        self.activation = pytorch_spiking.SpikingActivation(torch.nn.ReLU())
+
+        # Implementing hidden layers:
+        self.hidden_layers = nn.ModuleList(
+            [nn.Linear(input_size, hidden_layers[0])])  # first layer, from input to first hidden layer
+        layer_sizes = zip(hidden_layers[:-1], hidden_layers[1:])
+        self.hidden_layers.extend([nn.Linear(h1, h2) for h1, h2 in layer_sizes])  # hidden layers implemented here
+        self.constant_layers = nn.ModuleList(
+            [nn.Linear(h, h) for h in hidden_layers])  # constant layers are implemented here (for residual layers)
+        self.output = nn.Linear(hidden_layers[-1], output_size)  # the output layer
+
+        # batch normalisation layers implemented here:
+        self.bat = nn.ModuleList([nn.BatchNorm1d(hidden_layers[i]) for i in range(0, len(hidden_layers))])
+
+    def forward(self, input):
+        input = torch.tile(input[:, None], (1, 10, 1))
+        if self.embedding:
+            input = self.embedder(input)
+        # step 1. For each hidden layer:
+        for i, linear in enumerate(self.hidden_layers):
+            # step 2. Apply activation after layer
+            input = self.activation(linear(input))
+
+            # step 3. If residual layers are enabled: add another constant layer from the previous layer output, with an activation
+            if self.res_layers:
+                input = self.activation(self.constant_layers[i](input)) + input
+
+            # step 4. Batch normalise
+            input = self.bat[i](input)
+
+            # step 5. Dropout
+            input = self.dropout(input)
+
+        # step 6. output layer and sigmoid
+        output = self.output(input)
+        return output
 
 
 if __name__ == "__main__":

@@ -1,17 +1,33 @@
+import pickle
 import joblib
-import torch
-from rdkit import DataStructs
+import numpy as np
+import pandas as pd
 
 # Load the pre-trained RandomForest model from the .joblib file
 model = joblib.load("models/rf_classification_morgan_fp.joblib")
 
-# Example input data for classification (make sure this matches the shape of your model's expected input)
-# For example, if the model expects 5 features, we should provide a 2D array with 5 features for each sample
-input_tensors = torch.randint(0, 2, (10, 2048), dtype=torch.uint8)
-# Use the model to predict the class labels for the input data
-predictions = model.predict(input_tensors)
+# Load the DataFrame
+df = pd.read_pickle("/nethome/pjajoria/Github/Tox21Noisy/outputs/similar_molecules/old_checkpoints/weighted_tanimoto/similar_molecules_dataframe.pkl")
+X_similar = np.array(df["Fingerprint"].tolist())
+# predictions = model.predict(X_similar)
 
-# Print the predicted class labels
-print("Predicted class labels:", predictions)
+# X_similar_np = X_similar.numpy()
 
-# sim = DataStructs.TanimotoSimilarity(fp1,fp2)
+# Get prediction probabilities
+probabilities = model.predict_proba(X_similar)
+
+# Define a custom threshold (e.g., 0.6)
+custom_threshold = 0.4
+
+df["RandomForestLabels"] = (probabilities[:, 1] >= custom_threshold)
+
+positive_samples = df["RandomForestLabels"].sum()
+total_samples = len(df)
+print(f"Positive Samples: {positive_samples}/{total_samples}")
+# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# baseline_model = Cache5AntagonistPredictor().to(device)
+# baseline_model.load_state_dict(torch.load("models/nal_model.pt"))
+#
+# dl_predictions = predict(baseline_model, X_similar)
+#
+# print(len(dl_predictions[dl_predictions == 1]))

@@ -13,4 +13,4 @@ threadpool=$4
 echo "Running command: python /nethome/pjajoria/Github/Tox21Noisy/create_enamine_fingerprint_dataset.py \"$file_path_input\" \"$dir_output\" \"$batch_len\" \"$threadpool\" "
 
 # Run the processing script
-python /nethome/pjajoria/Github/Tox21Noisy/create_enamine_fingerprint_dataset.py "$file_path_input" "$dir_output" "$batch_len" "$threadpool"
+python -u /nethome/pjajoria/Github/Tox21Noisy/create_enamine_fingerprint_dataset.py "$file_path_input" "$dir_output" "$batch_len" "$threadpool"

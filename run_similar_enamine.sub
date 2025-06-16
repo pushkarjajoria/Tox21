@@ -1,32 +1,32 @@
 # HTCondor submit description file
-# Everything with a leading # is a comment
 
 universe                = docker
-docker_image            = pushkarjajoria/noisy_labels:rdkit
+docker_image            = pushkarjajoria/noisy_labels:rdkit_updated
 initialdir              = /nethome/pjajoria
 executable              = /nethome/pjajoria/Github/Tox21Noisy/run_hpc.sh
 output                  = /nethome/pjajoria/Github/Tox21Noisy/logfiles/run.sh.$(ClusterId).$(Year)_$(Month)_$(Day)_$(SUBMIT_TIME).out
 error                   = /nethome/pjajoria/Github/Tox21Noisy/logfiles/run.sh.$(ClusterId).$(Year)_$(Month)_$(Day)_$(SUBMIT_TIME).err
 log                     = /nethome/pjajoria/Github/Tox21Noisy/logfiles/run.sh.$(ClusterId).$(Year)_$(Month)_$(Day)_$(SUBMIT_TIME).log
 request_CPUs            = 1
-request_memory          = 64G
+request_memory          = 20G
+request_GPUs            = 1
 
 # Files for cl18lx (Set 1)
 requirements            = (Machine == "cl17lx.lsv.uni-saarland.de")
-arguments               = /data/corpora/enamine/with_fingerprint/Enamine_REAL_HAC_29_38_1_3B_Part_1_CXSMILES 512 odd 1
+arguments               = 1 weighted_tanimoto
 queue 1
 
 # Files for cl18lx (Set 2)
 requirements            = (Machine == "cl17lx.lsv.uni-saarland.de")
-arguments               = /data/corpora/enamine/with_fingerprint/Enamine_REAL_HAC_29_38_1_3B_Part_1_CXSMILES 512 even 2
+arguments               = 2 weighted_tanimoto
 queue 1
 
 # Files for cl18lx (Set 3)
 requirements            = (Machine == "cl17lx.lsv.uni-saarland.de")
-arguments               = /data/corpora/enamine/with_fingerprint/Enamine_REAL_HAC_29_38_1_3B_Part_2_CXSMILES 512 odd 3
+arguments               = 3 weighted_tanimoto
 queue 1
 
 # Files for cl18lx (Set 4)
 requirements            = (Machine == "cl17lx.lsv.uni-saarland.de")
-arguments               = /data/corpora/enamine/with_fingerprint/Enamine_REAL_HAC_29_38_1_3B_Part_2_CXSMILES 512 even 4
+arguments               = 4 weighted_tanimoto
 queue 1

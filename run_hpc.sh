@@ -10,11 +10,11 @@ job_type=$3             # Job type: 'odd' or 'even'
 identifier=$4
 
 # Install the required library
-pip install rdkit
+#pip install rdkit
 # pip install --upgrade numpy 
 
 # Echo the command to show variable values
 echo "Running command: python /nethome/pjajoria/Github/Tox21Noisy/find_similar_molecules_tensor.py \"$directory_paths\" \"$batch_size\" --job_type \"$job_type\" > output_$identifier.log"
 
 # Run the processing script
-python /nethome/pjajoria/Github/Tox21Noisy/find_similar_molecules_tensor.py "$directory_paths" "$batch_size" --job_type "$job_type" > /nethome/pjajoria/Github/Tox21Noisy/logs/output_$identifier.log
+python3.9 -u /nethome/pjajoria/Github/Tox21Noisy/find_similar_molecules_tensor.py "$directory_paths" "$batch_size" --job_type "$job_type"

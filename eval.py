@@ -35,21 +35,32 @@ def get_all_pred_and_labels(model, train_data_loader, fingerprint=True):
 
 
 def get_all_pred_and_labels_cache5(model, train_data_loader, fingerprint=True):
+    model.eval()
     device = "cuda" if torch.cuda.is_available() else "cpu"
     all_labels = []
     all_preds = []
-    for batch in train_data_loader:
-        if fingerprint:
-            x = batch['x'].float().to(device)  # Fingerprint Input
-        else:
-            x = batch['x']  # Smile input
-        labels = batch['label'].long().to(device)  # Labels should be of type long for CrossEntropyLoss
-        output = model(x)
-        pred = torch.argmax(output, dim=1).cpu().numpy()  # Apply threshold for binary classification
-        all_labels.extend(labels.cpu().numpy())  # Store true labels
-        all_preds.extend(pred)  # Store predicted labels
+    with torch.no_grad():
+        for batch in train_data_loader:
+            if fingerprint:
+                x = batch['x'].float().to(device)  # Fingerprint Input
+            else:
+                x = batch['x']  # Smile input
+            labels = batch['label'].long().to(device)  # Labels should be of type long for CrossEntropyLoss
+            output = model(x)
+            pred = torch.argmax(output, dim=1).cpu().numpy()  # Apply threshold for binary classification
+            all_labels.extend(labels.cpu().numpy())  # Store true labels
+            all_preds.extend(pred)  # Store predicted labels
 
     return np.array(all_preds), np.array(all_labels)
+
+
+def predict(model, X):
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    model.eval()
+    with torch.no_grad():
+        output = model(X.float().to(device))
+        pred = torch.argmax(output, dim=1).cpu().numpy()
+        return pred
 
 
 def get_all_pred_and_labels_mnist(model, train_data_loader):

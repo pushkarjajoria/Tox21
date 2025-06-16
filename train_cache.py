@@ -1,148 +1,176 @@
 import random
 from datetime import datetime
 import numpy as np
-import sklearn
 import torch
+from torch import nn
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+
 from data_prep import create_train_test_val_splits
 from data_prep_transformer import SmilesDataset
-from eval import get_all_pred_and_labels_cache5
-from model import HybridModel, Cache5AntagonistPredictor, Channel2D
-from utils import calculate_positive_percentage, EarlyStopping, test_cache5, validation_loss_cache5, hybrid_train_mnist
+from utils import test_cache5, validation_loss_cache5
+from model import Cache5AntagonistPredictor, IFMEncoder, SpikingCache5AntagonistPredictor
+from utils import calculate_positive_percentage, EarlyStopping
 
-# Device setup
-device = "cuda" if torch.cuda.is_available() else "cpu"
-print(f"Running the model on {device}")
-print(torch.version.cuda)
-
-patience = 5
-BETA = 0.0
-batch_size = 64
-val_batch_size = 1000
-seed = 42
-
-# Dataset preparation
-data_path = 'benchmark_datasets/CACHE5/20240430_MCHR1_splitted_RJ.csv'
-train_dataset, val_dataset, test_dataset = create_train_test_val_splits(data_path)
-
-fingerprint = False if type(train_dataset) == SmilesDataset else True
-
-# Input about PCA Transformation
-pca_transform_data = True
-n_pca_components = 1024
-
-# Using the noised dataset for training
-
-np.random.seed(seed)
-random.seed(seed)
-torch.manual_seed(seed)
+# ---------------- Helper Functions ---------------- #
 
 
-if pca_transform_data:
-    pca = train_dataset.fit_transform_pca(n_components=n_pca_components)
-# Create val dataset
-if pca_transform_data:
-    _ = val_dataset.fit_transform_pca(pca=pca)
-# Create data loaders
-train_data_loader = DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=True)
-val_data_loader = DataLoader(dataset=val_dataset, batch_size=val_batch_size, shuffle=False)
-
-if pca_transform_data:
-    test_dataset.fit_transform_pca(pca=pca)
-
-test_data_loader = DataLoader(dataset=test_dataset, batch_size=1000, shuffle=False)
-
-train_positive_percentage = calculate_positive_percentage(train_dataset)
-test_positive_percentage = calculate_positive_percentage(test_dataset)
-print(f"Len of Train: {len(train_dataset)}")
-print(f"Len of Test: {len(test_dataset)}")
-print(f'Percentage of positive test results in training dataset: {train_positive_percentage}%')
-print(f'Percentage of positive test results in testing dataset: {test_positive_percentage}%')
-
-# Model setup
-# Calculate weights for both classes
-positive_weight = (100 - train_positive_percentage) / 100.0
-negative_weight = train_positive_percentage / 100.0
-class_weights = torch.tensor([negative_weight, positive_weight], dtype=torch.float32).to(device).T  # Weight for both classes
-if pca_transform_data:
-    input_size = n_pca_components
-else:
-    input_size = 2048
-baseline_model = Cache5AntagonistPredictor(input_size=input_size, output_size=2, seed=seed).to(device)
-optim = torch.optim.Adam(baseline_model.parameters(), lr=1e-4, weight_decay=1e-5)
-criterion = torch.nn.CrossEntropyLoss(reduction='mean', weight=class_weights).to(device)
-
-epochs = 50
-early_stopping = EarlyStopping(patience=patience)
-# Training loop
-for epoch in tqdm(range(epochs)):
-    baseline_model.train()
-    running_loss = 0
-    for batch in train_data_loader:
-        if fingerprint:
-            x = batch['x'].float().to(device)   # Fingerprint Input
-        else:
-            x = batch['x']  # Smile input
-        labels = batch['label'].long().to(device)  # Labels should be of type long for CrossEntropyLoss
-        batch_len = x.shape[0]
-        # num_tasks = labels.shape[1]
-        optim.zero_grad()
-        output = baseline_model(x)
-        loss = criterion(output, labels)
-        loss.backward()
-        optim.step()
-        running_loss += loss.item()
-
-    av_val_loss = validation_loss_cache5(baseline_model, val_data_loader, criterion, device, fingerprint=fingerprint)
-    print(f'Epoch: {epoch + 1}/{epochs}, '
-          f'Training Loss: {running_loss/len(train_data_loader):.4f}, '
-          f'Validation Loss: {av_val_loss:.4f}, ')
-
-    # Check early stopping
-    early_stopping(av_val_loss, model=baseline_model)
-
-    if early_stopping.early_stop:
-        print("Early stopping triggered. Stopping training.", flush=True)
-        early_stopping.load_best_model(baseline_model)
-        break
-
-accuracy_task_map, precision_task_map, recall_task_map, f1_task_map, roc_auc_task_map \
-    = test_cache5(test_data_loader, baseline_model, fingerprint=fingerprint)
-
-baseline_output, y_train_noise = get_all_pred_and_labels_cache5(baseline_model, train_data_loader, fingerprint=fingerprint)
-
-baseline_confusion = sklearn.metrics.confusion_matrix(y_true=y_train_noise, y_pred=baseline_output)
-channel_weights = baseline_confusion.T.copy().astype(float)
-channel_weights /= channel_weights.sum(axis=1, keepdims=True)
-channel_weights = np.log(channel_weights + 1e-8)
-channel_weights = torch.from_numpy(channel_weights)
-channel_weights = channel_weights.float()
-
-noisemodel = Channel2D(input_dim=2, output_dim=2, theta=channel_weights.to(device))
-noise_optimizer = torch.optim.Adam(noisemodel.parameters(), lr=1e-3)
-
-print("noisy channel finished.")
-early_stopping = EarlyStopping(patience=patience, verbose=True)
-
-# noisy model train and test
-for epoch in tqdm(range(epochs)):
-    hybrid_train_mnist(train_data_loader, baseline_model, noisemodel, optim, noise_optimizer, criterion, BETA=BETA, fingerprint=fingerprint)
-    hybrid_model = HybridModel(baseline_model, noisemodel)
-    av_val_loss_baseline = validation_loss_cache5(baseline_model, val_data_loader, criterion, device, fingerprint=fingerprint)
-    av_val_loss_noise_model = validation_loss_cache5(hybrid_model, val_data_loader, criterion, device, fingerprint=fingerprint)
-    validation_loss = BETA * av_val_loss_baseline + (1 - BETA) * av_val_loss_noise_model
-    early_stopping(validation_loss, baseline_model)
-    if early_stopping.early_stop:
-        print("Early stopping triggered. Stopping training.")
-        early_stopping.load_best_model(baseline_model)
-        break
-
-print("Stats for Hybrid Noise Adaptive model")
-accuracy, precision, recall, f1, auc_roc = test_cache5(test_data_loader, baseline_model, fingerprint=fingerprint)
-print("Finished hybrid training.")
+def set_random_seed(seed):
+    np.random.seed(seed)
+    random.seed(seed)
+    torch.manual_seed(seed)
 
 
-current_time = datetime.now().strftime("%Y-%m-%d_%H-%M")
-plot_name = "results_pickle"
-plot_name = f"/nethome/pjajoria/Github/Tox21Noisy/outputs/result_pickles/{plot_name}_{current_time}.pkl"
+def get_device():
+    return "cuda" if torch.cuda.is_available() else "cpu"
+
+
+def prepare_datasets(data_path, batch_size, val_batch_size, pca_transform_data=False, n_pca_components=1024):
+    train_dataset, val_dataset, test_dataset = create_train_test_val_splits(data_path)
+    fingerprint = not isinstance(train_dataset, SmilesDataset)
+
+    if pca_transform_data:
+        pca = train_dataset.fit_transform_pca(n_components=n_pca_components)
+        val_dataset.fit_transform_pca(pca=pca)
+        test_dataset.fit_transform_pca(pca=pca)
+
+    train_loader = DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=True)
+    val_loader = DataLoader(dataset=val_dataset, batch_size=val_batch_size, shuffle=False)
+    test_loader = DataLoader(dataset=test_dataset, batch_size=1000, shuffle=False)
+
+    return train_dataset, val_dataset, test_dataset, train_loader, val_loader, test_loader, fingerprint
+
+
+def build_model(input_size, seed, device, class_weights, with_embedder=False, embedder=None, activation=None, model=None):
+    if model is None:
+        model = Cache5AntagonistPredictor(
+            input_size=input_size,
+            output_size=2,
+            seed=seed,
+            embedding=with_embedder,
+            embedder=embedder,
+            activation=activation
+        ).to(device)
+    else:
+        model = model.to(device)
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-4, weight_decay=1e-5)
+    criterion = torch.nn.CrossEntropyLoss(reduction='mean', weight=class_weights).to(device)
+    return model, optimizer, criterion
+
+
+def train_model(model, optimizer, criterion, train_loader, val_loader, device, fingerprint, epochs=50, patience=5, verbose=False):
+    early_stopping = EarlyStopping(patience=patience)
+    for epoch in tqdm(range(epochs), desc="Training Epochs"):
+        model.train()
+        running_loss = 0
+        for batch in train_loader:
+            x = batch['x'].float().to(device) if fingerprint else batch['x']
+            labels = batch['label'].long().to(device)
+            optimizer.zero_grad()
+            output = model(x)
+            loss = criterion(output, labels)
+            loss.backward()
+            optimizer.step()
+            running_loss += loss.item()
+        avg_train_loss = running_loss / len(train_loader)
+        avg_val_loss = validation_loss_cache5(model, val_loader, criterion, device, fingerprint=fingerprint)
+        if verbose:
+            print(f"Epoch: {epoch+1}, Training Loss: {avg_train_loss:.4f}, Validation Loss: {avg_val_loss:.4f}")
+
+        early_stopping(avg_val_loss, model=model)
+        if early_stopping.early_stop:
+            print("Early stopping triggered. Restoring best model.")
+            early_stopping.load_best_model(model)
+            break
+    return model
+
+
+def evaluate_model(model, test_loader, fingerprint):
+    return test_cache5(test_loader, model, fingerprint=fingerprint)
+
+
+class MajorityClassifier(nn.Module):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def forward(self, x):
+        return torch.stack([torch.ones(x.shape[0]), torch.zeros(x.shape[0])], dim=1).to(x.device)
+
+
+# ---------------- Main Pipeline ---------------- #
+def main(with_embedder=False, embedder=None, patience=5, activation=torch.relu, verbose=False, model=None):
+    device = get_device()
+    print(f"Running the model on {device}")
+    print(torch.version.cuda)
+
+    seed = 42
+    set_random_seed(seed)
+
+    # Configurations
+    patience = patience
+    batch_size = 64
+    val_batch_size = 1000
+    pca_transform_data = False
+    n_pca_components = 1024
+    data_path = 'benchmark_datasets/CACHE5/20240430_MCHR1_splitted_RJ.csv'
+
+    # Prepare datasets and loaders
+    (train_dataset, val_dataset, test_dataset,
+     train_loader, val_loader, test_loader, fingerprint) = prepare_datasets(
+        data_path, batch_size, val_batch_size, pca_transform_data, n_pca_components
+    )
+
+    # Calculate and display class statistics
+    train_positive_percentage = calculate_positive_percentage(train_dataset)
+    test_positive_percentage = calculate_positive_percentage(test_dataset)
+    if verbose:
+        print(f"Len of Train: {len(train_dataset)}")
+        print(f"Len of Test: {len(test_dataset)}")
+        print(f"Percentage of positive results in training: {train_positive_percentage}%")
+        print(f"Percentage of positive results in testing: {test_positive_percentage}%")
+
+    positive_weight = (100 - train_positive_percentage) / 100.0
+    negative_weight = train_positive_percentage / 100.0
+    class_weights = torch.tensor([negative_weight, positive_weight], dtype=torch.float32).to(device)
+
+    # Determine input size based on PCA setting
+    input_size = n_pca_components if pca_transform_data else 2048
+
+    # Build model
+    model, optimizer, criterion = build_model(input_size, seed, device, class_weights, with_embedder, embedder, activation=activation, model=model)
+    # model = MajorityClassifier()
+    # Train model
+    model = train_model(model, optimizer, criterion, train_loader, val_loader, device, fingerprint, epochs=50, patience=patience, verbose=verbose)
+
+    # Evaluate model
+    metrics = evaluate_model(model, test_loader, fingerprint)
+    (accuracy_task_map, precision_task_map, recall_task_map,
+     f1_task_map, roc_auc_task_map) = metrics
+
+    current_time = datetime.now().strftime("%Y-%m-%d_%H-%M")
+    plot_path = f"/nethome/pjajoria/Github/Tox21Noisy/outputs/result_pickles/results_pickle_{current_time}.pkl"
+    return model, metrics, plot_path
+
+
+if __name__ == "__main__":
+    # Create an embedder instance for experiments requiring embedding
+    ifm_embedder = IFMEncoder(2048, 8, 6)
+
+    print("Experiment 1: Baseline Model (Cache5)")
+    model_baseline, metrics_baseline, plot_path_baseline = main(with_embedder=False)
+
+    print("\nExperiment 2: Model with embedder (patience=7)")
+    model_with_embedder, metrics_with_embedder, plot_path_embedder = main(with_embedder=True, embedder=ifm_embedder, patience=7)
+
+    print("\nExperiment 3: Model without embedder using tanh activation (patience=7)")
+    model_no_embed_tanh, metrics_no_embed_tanh, plot_path_no_embed_tanh = main(with_embedder=False, patience=7, activation=torch.tanh)
+
+    print("\nExperiment 4: Model without embedder using sigmoid activation (patience=7)")
+    model_no_embed_sigmoid, metrics_no_embed_sigmoid, plot_path_no_embed_sigmoid = main(with_embedder=False, patience=7, activation=torch.sigmoid)
+
+    print("\nExperiment 5: Model with embedder using tanh activation (patience=7)")
+    model_embed_tanh, metrics_embed_tanh, plot_path_embed_tanh = main(with_embedder=True, embedder=ifm_embedder, patience=7, activation=torch.tanh)
+
+    # print("\nExperiment 6: Spiking NN")
+    # model = SpikingCache5AntagonistPredictor().to("cuda")
+    # model_spiking, metrics_spiking, plot_path_spiking = main(patience=7, model=model)

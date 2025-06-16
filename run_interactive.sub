@@ -1,0 +1,11 @@
+universe                = docker
+docker_image            = pushkarjajoria/noisy_labels:rdkit
+initialdir              = /nethome/pjajoria
+output                  = /nethome/pjajoria/Github/Tox21Noisy/logfiles/run.sh.$(ClusterId).$(Year)_$(Month)_$(Day)_$(SUBMIT_TIME).out
+error                   = /nethome/pjajoria/Github/Tox21Noisy/logfiles/run.sh.$(ClusterId).$(Year)_$(Month)_$(Day)_$(SUBMIT_TIME).err
+log                     = /nethome/pjajoria/Github/Tox21Noisy/logfiles/run.sh.$(ClusterId).$(Year)_$(Month)_$(Day)_$(SUBMIT_TIME).log
+request_CPUs            = 8
+request_memory          = 512G
+request_GPUs            = 0
+requirements            = (machine == "cl14lx.lsv.uni-saarland.de")
+queue 1
